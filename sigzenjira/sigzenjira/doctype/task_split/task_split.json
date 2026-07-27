@@ -1,0 +1,80 @@
+{
+ "actions": [],
+ "creation": "2026-07-22 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "task_item",
+  "description",
+  "expected_hours",
+  "extra_hours",
+  "generated_task",
+  "is_generating"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "task_item",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Task Item",
+   "read_only_depends_on": "eval:doc.generated_task",
+   "reqd": 1
+  },
+  {
+   "columns": 4,
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Description",
+   "read_only_depends_on": "eval:doc.generated_task"
+  },
+  {
+   "columns": 2,
+   "fieldname": "expected_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Expected Hours"
+  },
+  {
+   "columns": 2,
+   "default": "0",
+   "fieldname": "extra_hours",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Extra Hours",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "generated_task",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Generated Task",
+   "no_copy": 1,
+   "options": "Task",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_generating",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Is Generating",
+   "no_copy": 1,
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-07-22 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sigzenjira",
+ "name": "Task Split",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

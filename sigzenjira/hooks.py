@@ -5,6 +5,11 @@ app_description = "Erpnext extended Project management app"
 app_email = "lalit@gmail.com"
 app_license = "mit"
 
+fixtures = [
+	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project"]]]},
+	{"doctype": "Property Setter", "filters": [["doc_type", "=", "Task"]]},
+]
+
 # Apps
 # ------------------
 
@@ -43,7 +48,7 @@ app_license = "mit"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {"Task": "public/js/task.js", "Timesheet": "public/js/timesheet.js"}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -86,7 +91,7 @@ app_license = "mit"
 # ------------
 
 # before_install = "sigzenjira.install.before_install"
-# after_install = "sigzenjira.install.after_install"
+after_install = "sigzenjira.install.after_install"
 
 # Uninstallation
 # ------------
@@ -126,25 +131,45 @@ app_license = "mit"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.get_permission_query_conditions",
+}
+
+has_permission = {
+	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.has_permission",
+}
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"Task": {
+		"autoname": "sigzenjira.custom.task.autoname",
+		"before_validate": "sigzenjira.custom.task.mark_parent_as_group",
+		"validate": [
+			"sigzenjira.custom.task.validate_work_item_type_permission",
+			"sigzenjira.custom.task.validate_hierarchy",
+			"sigzenjira.custom.task.validate_task_split_add_row_permission",
+			"sigzenjira.custom.task.rollup_story_expected_time",
+			"sigzenjira.custom.task.validate_hour_budget",
+			"sigzenjira.custom.task.validate_expected_time_edit_permission",
+		],
+		"on_update": [
+			"sigzenjira.custom.task.generate_tasks_from_split",
+			"sigzenjira.custom.task.sync_split_row_edits_to_generated_task",
+			"sigzenjira.custom.task.sync_expected_hours_to_split_row",
+			"sigzenjira.custom.task.cascade_completion_to_parent",
+			"sigzenjira.custom.timesheet.rollup_actual_time_on_reparent",
+		],
+		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
+	},
+	"Timesheet": {
+		"validate": "sigzenjira.custom.timesheet.validate_task_type",
+		"on_submit": "sigzenjira.custom.timesheet.rollup_actual_time",
+		"on_cancel": "sigzenjira.custom.timesheet.rollup_actual_time",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
