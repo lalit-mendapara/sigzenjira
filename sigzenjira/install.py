@@ -222,6 +222,12 @@ def create_pm_dashboard():
 
 
 def add_pm_dashboard_workspace_shortcut():
+	# Inserting the child row directly via frappe.new_doc() (not via ws.append() +
+	# ws.save()) because the existing "Project Management" workspace already has a
+	# broken shortcut (Task Hour Budget Overrun → a Report that does not exist on
+	# this site), which causes ws.save() to fail with LinkValidationError. This
+	# approach also ensures that function is idempotent and never disturbs the
+	# pre-existing workspace state.
 	shortcut = get_workspace_shortcut()
 	# Check if shortcut already exists
 	if frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
