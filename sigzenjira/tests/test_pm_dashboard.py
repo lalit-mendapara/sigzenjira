@@ -1,7 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.install import create_pm_dashboard_reports, create_pm_dashboard_cards
+from sigzenjira.install import create_pm_dashboard_reports, create_pm_dashboard_cards, create_pm_dashboard_charts
 
 
 class TestPMDashboardReports(IntegrationTestCase):
@@ -84,4 +84,54 @@ class TestPMDashboardCards(IntegrationTestCase):
 		count_before = frappe.db.count("Number Card", {"label": ["like", "PM %"]})
 		create_pm_dashboard_cards()
 		count_after = frappe.db.count("Number Card", {"label": ["like", "PM %"]})
+		self.assertEqual(count_before, count_after)
+
+
+class TestPMDashboardCharts(IntegrationTestCase):
+	def setUp(self):
+		# Create a Task record so group-by charts have data to work with
+		if not frappe.db.exists("Task", {"subject": "Test Task for Dashboard Charts"}):
+			frappe.get_doc({
+				"doctype": "Task",
+				"subject": "Test Task for Dashboard Charts",
+				"status": "Open",
+				"custom_work_item_type": "Task",
+			}).insert(ignore_permissions=True)
+
+	def test_creates_eight_charts_with_correct_roles(self):
+		create_pm_dashboard_charts()
+
+		manager_only = [
+			"PM Tasks by Status",
+			"PM Tasks by Work Item Type",
+			"PM Issues by Status",
+			"PM Workload Distribution",
+			"PM Hours Logged Trend",
+		]
+		my_work = [
+			"PM My Tasks by Status",
+			"PM My Issues by Status",
+			"PM My Hours Trend",
+		]
+
+		for name in manager_only:
+			chart = frappe.get_doc("Dashboard Chart", name)
+			self.assertEqual([r.role for r in chart.roles], ["Projects Manager"])
+
+		for name in my_work:
+			chart = frappe.get_doc("Dashboard Chart", name)
+			self.assertEqual(sorted(r.role for r in chart.roles), ["Projects Manager", "Projects User"])
+
+	def test_chart_config_renders_without_error(self):
+		create_pm_dashboard_charts()
+		from frappe.desk.doctype.dashboard_chart.dashboard_chart import get as get_chart_config
+
+		config = get_chart_config(chart_name="PM Tasks by Status")
+		self.assertIsInstance(config, dict)
+
+	def test_charts_idempotent_on_rerun(self):
+		create_pm_dashboard_charts()
+		count_before = frappe.db.count("Dashboard Chart", {"chart_name": ["like", "PM %"]})
+		create_pm_dashboard_charts()
+		count_after = frappe.db.count("Dashboard Chart", {"chart_name": ["like", "PM %"]})
 		self.assertEqual(count_before, count_after)

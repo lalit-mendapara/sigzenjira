@@ -1,3 +1,7 @@
+ORG_ROLES = ["Projects Manager"]
+MY_WORK_ROLES = ["Projects User", "Projects Manager"]
+
+
 def get_query_reports():
 	return [
 		{
@@ -148,5 +152,101 @@ def get_number_cards():
 			"function": "Count",
 			"filters": [["Issue", "status", "not in", ["Resolved", "Closed"]]],
 			"dynamic_filters": me_assign_filter("Issue"),
+		},
+	]
+
+
+def get_dashboard_charts():
+	me_assign_filter = lambda doctype: [[doctype, "_assign", "like", "'%' + frappe.session.user + '%'"]]
+
+	return [
+		{
+			"chart_name": "PM Tasks by Status",
+			"chart_type": "Group By",
+			"document_type": "Task",
+			"group_by_based_on": "status",
+			"group_by_type": "Count",
+			"type": "Donut",
+			"roles": ORG_ROLES,
+			"filters": [],
+		},
+		{
+			"chart_name": "PM Tasks by Work Item Type",
+			"chart_type": "Group By",
+			"document_type": "Task",
+			"group_by_based_on": "custom_work_item_type",
+			"group_by_type": "Count",
+			"type": "Bar",
+			"roles": ORG_ROLES,
+			"filters": [],
+		},
+		{
+			"chart_name": "PM Issues by Status",
+			"chart_type": "Group By",
+			"document_type": "Issue",
+			"group_by_based_on": "status",
+			"group_by_type": "Count",
+			"type": "Donut",
+			"roles": ORG_ROLES,
+			"filters": [],
+		},
+		{
+			"chart_name": "PM Workload Distribution",
+			"chart_type": "Group By",
+			"document_type": "ToDo",
+			"group_by_based_on": "allocated_to",
+			"group_by_type": "Count",
+			"type": "Bar",
+			"roles": ORG_ROLES,
+			"filters": [["ToDo", "reference_type", "=", "Task"], ["ToDo", "status", "=", "Open"]],
+		},
+		{
+			"chart_name": "PM Hours Logged Trend",
+			"chart_type": "Sum",
+			"document_type": "Timesheet",
+			"value_based_on": "total_hours",
+			"timeseries": 1,
+			"based_on": "start_date",
+			"time_interval": "Weekly",
+			"timespan": "Last Quarter",
+			"type": "Line",
+			"roles": ORG_ROLES,
+			"filters": [["Timesheet", "docstatus", "=", 1]],
+		},
+		{
+			"chart_name": "PM My Tasks by Status",
+			"chart_type": "Group By",
+			"document_type": "Task",
+			"group_by_based_on": "status",
+			"group_by_type": "Count",
+			"type": "Donut",
+			"roles": MY_WORK_ROLES,
+			"filters": [],
+			"dynamic_filters": me_assign_filter("Task"),
+		},
+		{
+			"chart_name": "PM My Issues by Status",
+			"chart_type": "Group By",
+			"document_type": "Issue",
+			"group_by_based_on": "status",
+			"group_by_type": "Count",
+			"type": "Donut",
+			"roles": MY_WORK_ROLES,
+			"filters": [],
+			"dynamic_filters": me_assign_filter("Issue"),
+		},
+		{
+			"chart_name": "PM My Hours Trend",
+			"chart_type": "Sum",
+			"document_type": "Timesheet",
+			"value_based_on": "total_hours",
+			"timeseries": 1,
+			"based_on": "start_date",
+			"time_interval": "Weekly",
+			"timespan": "Last Quarter",
+			"type": "Line",
+			"roles": MY_WORK_ROLES,
+			"filters": [["Timesheet", "docstatus", "=", 1]],
+			"dynamic_filters": [["Timesheet", "owner", "=", "frappe.session.user"]],
 		},
 	]
