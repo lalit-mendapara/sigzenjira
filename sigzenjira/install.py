@@ -3,6 +3,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 from sigzenjira.custom.custom_fields import get_custom_fields
+from sigzenjira.custom.dashboard import get_query_reports
 
 
 def after_install():
@@ -165,3 +166,20 @@ def create_additional_hours_request_workflow():
 			],
 		}
 	).insert(ignore_permissions=True)
+
+
+def create_pm_dashboard_reports():
+	for report in get_query_reports():
+		if frappe.db.exists("Report", report["report_name"]):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Report",
+				"report_name": report["report_name"],
+				"ref_doctype": report["ref_doctype"],
+				"report_type": "Query Report",
+				"is_standard": "No",
+				"query": report["query"],
+				"roles": [{"role": "Projects Manager"}],
+			}
+		).insert(ignore_permissions=True)
