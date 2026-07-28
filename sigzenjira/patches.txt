@@ -14,3 +14,4 @@ sigzenjira.patches.v0_0.grant_task_template_director_po_access
 sigzenjira.patches.v0_0.allow_task_split_add_row
 sigzenjira.patches.v0_0.make_depends_on_readonly
 sigzenjira.patches.v0_0.add_project_extra_hours_approver_field
+sigzenjira.patches.v0_0.create_pm_dashboard

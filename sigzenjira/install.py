@@ -12,6 +12,7 @@ def after_install():
 	create_task_projects_manager_docperm()
 	create_task_template_director_po_docperm()
 	create_additional_hours_request_workflow()
+	create_pm_dashboard()
 	frappe.clear_cache(doctype="Task")
 
 

@@ -8,6 +8,10 @@ app_license = "mit"
 fixtures = [
 	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project"]]]},
 	{"doctype": "Property Setter", "filters": [["doc_type", "=", "Task"]]},
+	{"doctype": "Report", "filters": [["report_name", "like", "PM %"]]},
+	{"doctype": "Number Card", "filters": [["label", "like", "PM %"]]},
+	{"doctype": "Dashboard Chart", "filters": [["chart_name", "like", "PM %"]]},
+	{"doctype": "Dashboard", "filters": [["dashboard_name", "like", "PM %"]]},
 ]
 
 # Apps
