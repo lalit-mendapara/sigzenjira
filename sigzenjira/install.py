@@ -3,7 +3,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 from sigzenjira.custom.custom_fields import get_custom_fields
-from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get_dashboard_charts
+from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get_dashboard_charts, get_dashboard, get_workspace_shortcut
 
 
 def after_install():
@@ -207,3 +207,31 @@ def create_pm_dashboard_charts():
 		if "dynamic_filters" in doc_dict:
 			doc_dict["dynamic_filters_json"] = frappe.as_json(doc_dict.pop("dynamic_filters"))
 		frappe.get_doc(doc_dict).insert(ignore_permissions=True)
+
+
+def create_pm_dashboard():
+	create_pm_dashboard_reports()
+	create_pm_dashboard_cards()
+	create_pm_dashboard_charts()
+
+	dashboard = get_dashboard()
+	if not frappe.db.exists("Dashboard", dashboard["dashboard_name"]):
+		frappe.get_doc({"doctype": "Dashboard", **dashboard}).insert(ignore_permissions=True)
+
+	add_pm_dashboard_workspace_shortcut()
+
+
+def add_pm_dashboard_workspace_shortcut():
+	shortcut = get_workspace_shortcut()
+	# Check if shortcut already exists
+	if frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+		return
+	# Insert shortcut row as a child document
+	doc = frappe.new_doc("Workspace Shortcut")
+	doc.update({
+		"parent": "Project Management",
+		"parenttype": "Workspace",
+		"parentfield": "shortcuts",
+		**shortcut,
+	})
+	doc.insert(ignore_permissions=True)

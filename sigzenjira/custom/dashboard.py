@@ -250,3 +250,25 @@ def get_dashboard_charts():
 			"dynamic_filters": [["Timesheet", "owner", "=", "frappe.session.user"]],
 		},
 	]
+
+
+def get_dashboard():
+	trend_charts = {"PM Hours Logged Trend", "PM My Hours Trend"}
+	card_names = [card["label"] for card in get_number_cards()]
+	chart_names = [chart["chart_name"] for chart in get_dashboard_charts()]
+
+	return {
+		"dashboard_name": "PM Project Management Dashboard",
+		"cards": [{"card": name} for name in card_names],
+		"charts": [
+			{"chart": name, "width": "Full" if name in trend_charts else "Half"} for name in chart_names
+		],
+	}
+
+
+def get_workspace_shortcut():
+	return {
+		"label": "PM Dashboard",
+		"type": "Dashboard",
+		"link_to": "PM Project Management Dashboard",
+	}

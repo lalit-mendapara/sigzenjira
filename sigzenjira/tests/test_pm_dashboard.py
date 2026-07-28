@@ -1,7 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.install import create_pm_dashboard_reports, create_pm_dashboard_cards, create_pm_dashboard_charts
+from sigzenjira.install import create_pm_dashboard_reports, create_pm_dashboard_cards, create_pm_dashboard_charts, create_pm_dashboard
 
 
 class TestPMDashboardReports(IntegrationTestCase):
@@ -135,3 +135,32 @@ class TestPMDashboardCharts(IntegrationTestCase):
 		create_pm_dashboard_charts()
 		count_after = frappe.db.count("Dashboard Chart", {"chart_name": ["like", "PM %"]})
 		self.assertEqual(count_before, count_after)
+
+
+class TestPMDashboard(IntegrationTestCase):
+	def test_dashboard_links_all_cards_and_charts(self):
+		create_pm_dashboard()
+
+		dashboard = frappe.get_doc("Dashboard", "PM Project Management Dashboard")
+		self.assertEqual(len(dashboard.cards), 12)
+		self.assertEqual(len(dashboard.charts), 8)
+
+		card_names = {row.card for row in dashboard.cards}
+		self.assertIn("PM Open Tasks", card_names)
+		self.assertIn("PM My Open Tasks", card_names)
+
+		chart_names = {row.chart for row in dashboard.charts}
+		self.assertIn("PM Tasks by Status", chart_names)
+		self.assertIn("PM My Tasks by Status", chart_names)
+
+	def test_workspace_shortcut_added_once(self):
+		create_pm_dashboard()
+		ws = frappe.get_doc("Workspace", "Project Management")
+		matches = [row for row in ws.shortcuts if row.link_to == "PM Project Management Dashboard"]
+		self.assertEqual(len(matches), 1)
+		self.assertEqual(matches[0].type, "Dashboard")
+
+		create_pm_dashboard()  # re-run must not duplicate the shortcut
+		ws_again = frappe.get_doc("Workspace", "Project Management")
+		matches_again = [row for row in ws_again.shortcuts if row.link_to == "PM Project Management Dashboard"]
+		self.assertEqual(len(matches_again), 1)
