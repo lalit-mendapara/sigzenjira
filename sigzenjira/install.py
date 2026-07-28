@@ -3,7 +3,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 from sigzenjira.custom.custom_fields import get_custom_fields
-from sigzenjira.custom.dashboard import get_query_reports
+from sigzenjira.custom.dashboard import get_query_reports, get_number_cards
 
 
 def after_install():
@@ -183,3 +183,15 @@ def create_pm_dashboard_reports():
 				"roles": [{"role": "Projects Manager"}],
 			}
 		).insert(ignore_permissions=True)
+
+
+def create_pm_dashboard_cards():
+	for card in get_number_cards():
+		if frappe.db.exists("Number Card", card["label"]):
+			continue
+		doc_dict = {"doctype": "Number Card", **card}
+		if "filters" in doc_dict:
+			doc_dict["filters_json"] = frappe.as_json(doc_dict.pop("filters"))
+		if "dynamic_filters" in doc_dict:
+			doc_dict["dynamic_filters_json"] = frappe.as_json(doc_dict.pop("dynamic_filters"))
+		frappe.get_doc(doc_dict).insert(ignore_permissions=True)
