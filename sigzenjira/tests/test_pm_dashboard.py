@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -164,3 +166,19 @@ class TestPMDashboard(IntegrationTestCase):
 		ws_again = frappe.get_doc("Workspace", "Project Management")
 		matches_again = [row for row in ws_again.shortcuts if row.link_to == "PM Project Management Dashboard"]
 		self.assertEqual(len(matches_again), 1)
+
+	def test_workspace_content_block_added_once(self):
+		create_pm_dashboard()
+
+		def shortcut_blocks():
+			content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
+			return [
+				block
+				for block in content
+				if block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == "PM Dashboard"
+			]
+
+		self.assertEqual(len(shortcut_blocks()), 1)
+
+		create_pm_dashboard()  # re-run must not duplicate the content block
+		self.assertEqual(len(shortcut_blocks()), 1)

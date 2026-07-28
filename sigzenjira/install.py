@@ -1,3 +1,5 @@
+import json
+
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
@@ -231,14 +233,35 @@ def add_pm_dashboard_workspace_shortcut():
 	# pre-existing workspace state.
 	shortcut = get_workspace_shortcut()
 	# Check if shortcut already exists
-	if frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
-		return
-	# Insert shortcut row as a child document
-	doc = frappe.new_doc("Workspace Shortcut")
-	doc.update({
-		"parent": "Project Management",
-		"parenttype": "Workspace",
-		"parentfield": "shortcuts",
-		**shortcut,
-	})
-	doc.insert(ignore_permissions=True)
+	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+		# Insert shortcut row as a child document
+		doc = frappe.new_doc("Workspace Shortcut")
+		doc.update({
+			"parent": "Project Management",
+			"parenttype": "Workspace",
+			"parentfield": "shortcuts",
+			**shortcut,
+		})
+		doc.insert(ignore_permissions=True)
+
+	# The shortcuts child table alone doesn't render anything — Frappe's workspace
+	# UI builds the page layout from the `content` field (EditorJS-style JSON
+	# blocks) and only shows a "shortcut" block if `content` has one whose
+	# `shortcut_name` matches a row in `shortcuts` by label (see
+	# frappe/public/js/frappe/views/workspace/blocks/block.js make()). Written via
+	# frappe.db.set_value for the same reason as above: ws.save() would crash on
+	# the pre-existing broken "Task Hour Budget Overrun" shortcut link.
+	content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
+	already_has_block = any(
+		block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == shortcut["label"]
+		for block in content
+	)
+	if not already_has_block:
+		content.append(
+			{
+				"id": "sigzenjiraPmDashboardShortcut",
+				"type": "shortcut",
+				"data": {"shortcut_name": shortcut["label"], "col": 4},
+			}
+		)
+		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
