@@ -157,7 +157,11 @@ class TestPhase6Regression(IntegrationTestCase):
 			).insert(ignore_permissions=True)
 
 		project = frappe.get_doc(
-			{"doctype": "Project", "project_name": "PH6 Notify Project", "custom_extra_hours_approver": approver}
+			{
+				"doctype": "Project",
+				"project_name": "PH6 Notify Project",
+				"users": [{"user": approver, "custom_approve_extra_hours": 1}],
+			}
 		).insert(ignore_permissions=True)
 
 		task = frappe.get_doc(

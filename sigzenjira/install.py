@@ -199,14 +199,20 @@ def create_additional_hours_request_workflow():
 			"send_email_alert": 0,
 			"states": [
 				{"state": "Draft", "doc_status": "0", "allow_edit": "Employee"},
-				{"state": "Pending", "doc_status": "0", "allow_edit": "Projects Manager"},
-				{"state": "Approved", "doc_status": "0", "allow_edit": "Projects Manager"},
-				{"state": "Rejected", "doc_status": "0", "allow_edit": "Projects Manager"},
+				{"state": "Pending", "doc_status": "0", "allow_edit": "Employee"},
+				{"state": "Approved", "doc_status": "0", "allow_edit": "Employee"},
+				{"state": "Rejected", "doc_status": "0", "allow_edit": "Employee"},
 			],
 			"transitions": [
 				{"state": "Draft", "action": "Submit", "next_state": "Pending", "allowed": "Employee"},
-				{"state": "Pending", "action": "Approve", "next_state": "Approved", "allowed": "Projects Manager"},
-				{"state": "Pending", "action": "Reject", "next_state": "Rejected", "allowed": "Projects Manager"},
+				# "Employee" here is the broadest role holding write access to this
+				# doctype (see Custom DocPerm) - the real gate on who can actually
+				# approve/reject is has_permission (additional_hours_request.py),
+				# which only lets Projects Manager/System Manager, the requester's
+				# own project approver (Project User.custom_approve_extra_hours),
+				# or (for reads) the requester through.
+				{"state": "Pending", "action": "Approve", "next_state": "Approved", "allowed": "Employee"},
+				{"state": "Pending", "action": "Reject", "next_state": "Rejected", "allowed": "Employee"},
 			],
 		}
 	).insert(ignore_permissions=True)

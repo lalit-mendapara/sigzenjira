@@ -7,6 +7,8 @@ from frappe.desk.doctype.notification_log.notification_log import enqueue_create
 from frappe.model.document import Document
 from frappe.utils import flt, get_link_to_form
 
+from sigzenjira.custom.project_user import get_project_approvers, user_has_project_flag
+
 
 class AdditionalHoursRequest(Document):
 	def validate(self):
@@ -72,22 +74,19 @@ def notify_extra_hours_approver(ahr_doc):
 	if not project:
 		return
 
-	approver = frappe.db.get_value("Project", project, "custom_extra_hours_approver")
-	if not approver:
-		return
-
-	enqueue_create_notification(
-		approver,
-		{
-			"type": "Alert",
-			"document_type": ahr_doc.doctype,
-			"document_name": ahr_doc.name,
-			"subject": _("{0} requested {1} additional hour(s) on {2}").format(
-				ahr_doc.requested_by, ahr_doc.additional_hours_requested, ahr_doc.task
-			),
-			"from_user": ahr_doc.requested_by,
-		},
-	)
+	for approver in get_project_approvers(project):
+		enqueue_create_notification(
+			approver,
+			{
+				"type": "Alert",
+				"document_type": ahr_doc.doctype,
+				"document_name": ahr_doc.name,
+				"subject": _("{0} requested {1} additional hour(s) on {2}").format(
+					ahr_doc.requested_by, ahr_doc.additional_hours_requested, ahr_doc.task
+				),
+				"from_user": ahr_doc.requested_by,
+			},
+		)
 
 
 def get_permission_query_conditions(user=None):
@@ -95,7 +94,15 @@ def get_permission_query_conditions(user=None):
 	roles = frappe.get_roles(user)
 	if "Projects Manager" in roles or "System Manager" in roles:
 		return ""
-	return f"`tabAdditional Hours Request`.requested_by = {frappe.db.escape(user)}"
+	return f"""(
+		`tabAdditional Hours Request`.requested_by = {frappe.db.escape(user)}
+		or `tabAdditional Hours Request`.task in (
+			select task.name from `tabTask` task
+			inner join `tabProject User` pu on pu.parent = task.project
+				and pu.parenttype = 'Project' and pu.parentfield = 'users'
+			where pu.user = {frappe.db.escape(user)} and pu.custom_approve_extra_hours = 1
+		)
+	)"""
 
 
 def has_permission(doc, user=None, permission_type=None):
@@ -108,4 +115,7 @@ def has_permission(doc, user=None, permission_type=None):
 	# entirely to the role-level create permission here.
 	if permission_type == "create":
 		return True
-	return doc.requested_by == user
+	if doc.requested_by == user:
+		return True
+	project = frappe.db.get_value("Task", doc.task, "project")
+	return user_has_project_flag(project, "custom_approve_extra_hours")
