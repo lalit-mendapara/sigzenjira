@@ -6,6 +6,8 @@ from frappe.desk.form import assign_to
 from frappe.model.naming import make_autoname
 from frappe.utils import flt, get_link_to_form, getdate
 
+from sigzenjira.custom.project_user import user_has_project_flag
+
 WORK_ITEM_TYPE_NAME_PREFIX = {
 	"Epic": "E",
 	"Story": "S",
@@ -137,30 +139,47 @@ def sync_actual_extra_hours(doc, method):
 	doc.custom_actual_extra_hours = flt(doc.actual_time) - flt(doc.expected_time)
 
 
-def validate_task_split_add_row_permission(doc, method):
-	# Same privileged-role gate as classification itself (custom_task_split
-	# only exists on a Story, and only a privileged role can make one a
-	# Story in the first place) - re-checked here too since the Desk grid's
-	# "Add Row" button (task.js) is only a client-side hide, not real
-	# enforcement against direct API calls.
+def validate_task_split_expected_hours_permission(doc, method):
+	# Expected Hours is the budget commitment on a split row - only a Project
+	# User flagged custom_allocate_hours (or Administrator/System Manager,
+	# via user_has_project_flag) for this Task's project may set or change it.
+	# Re-checked here since the Desk grid (task.js) only makes the column
+	# read-only client-side, not real enforcement against direct API calls.
 	if doc.custom_work_item_type != "Story":
 		return
 
-	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
+	if user_has_project_flag(doc.project, "custom_allocate_hours"):
 		return
 
 	before = doc.get_doc_before_save()
-	existing_row_names = {row.name for row in (before.custom_task_split if before else [])}
-	new_rows = [row for row in (doc.get("custom_task_split") or []) if row.name not in existing_row_names]
+	before_rows = {row.name: flt(row.expected_hours) for row in (before.custom_task_split if before else [])}
 
-	# A Task Template picker (task.js custom_task_template handler) stubs
-	# rows with no expected_hours yet - that's a checklist, not a budget
-	# commitment, so it's the one thing an Employee is allowed to do on a
-	# Story (see validate_employee_story_field_restriction below). Only rows
-	# that already carry hours need the privileged-role gate.
-	new_rows_with_hours = [row for row in new_rows if flt(row.expected_hours)]
-	if new_rows_with_hours:
-		frappe.throw(_("Only a Director, Product Owner, or Projects Manager can add rows to the Task Split table."))
+	for row in doc.get("custom_task_split") or []:
+		previous_hours = before_rows.get(row.name, 0)
+		if flt(row.expected_hours) != previous_hours:
+			frappe.throw(_("Only a user with Allocate Hours access on this Project can set Expected Hours on the Task Split table."))
+
+
+def validate_task_split_assign_permission(doc, method):
+	# Assign is the other budget-adjacent commitment on a split row - only a
+	# Project User flagged custom_assign_users (or Administrator/System
+	# Manager, via user_has_project_flag) for this Task's project may stage
+	# assignees on a not-yet-generated row. Re-checked here since the Desk
+	# grid's Assign dialog (task.js) only hides/disables client-side, not
+	# real enforcement against direct API calls. The generated_task case is
+	# gated separately in set_split_row_assignees below.
+	if doc.custom_work_item_type != "Story":
+		return
+
+	if user_has_project_flag(doc.project, "custom_assign_users"):
+		return
+
+	before = doc.get_doc_before_save()
+	before_rows = {row.name: row.pending_assign_users for row in (before.custom_task_split if before else [])}
+
+	for row in doc.get("custom_task_split") or []:
+		if row.pending_assign_users != before_rows.get(row.name):
+			frappe.throw(_("Only a user with Assign Users access on this Project can assign users on the Task Split table."))
 
 
 def validate_one_story_per_issue(doc, method):
@@ -385,6 +404,18 @@ def sync_expected_hours_to_split_row(doc, method):
 
 
 @frappe.whitelist()
+def get_task_split_permissions(project=None):
+	# Backs the Desk grid's read-only/disabled lock on Task Split's Expected
+	# Hours column and Assign action (task.js) - client-side query of the
+	# same validate_task_split_expected_hours_permission /
+	# validate_task_split_assign_permission gates.
+	return {
+		"allocate_hours": user_has_project_flag(project, "custom_allocate_hours"),
+		"assign_users": user_has_project_flag(project, "custom_assign_users"),
+	}
+
+
+@frappe.whitelist()
 def set_split_row_assignees(row_name, users):
 	# The grid's Assign button/dialog (task_split.js) is the only write path
 	# for a row's assignment - real user action, so ignore_permissions=False
@@ -393,6 +424,11 @@ def set_split_row_assignees(row_name, users):
 	generated_task = frappe.db.get_value("Task Split", row_name, "generated_task")
 	if not generated_task:
 		frappe.throw(_("This row hasn't generated a Task yet."))
+
+	story_name = frappe.db.get_value("Task Split", row_name, "parent")
+	project = frappe.db.get_value("Task", story_name, "project")
+	if not user_has_project_flag(project, "custom_assign_users"):
+		frappe.throw(_("Only a user with Assign Users access on this Project can assign users on the Task Split table."))
 
 	raw_assign = frappe.db.get_value("Task", generated_task, "_assign")
 	current_users = set(json.loads(raw_assign) if raw_assign else [])

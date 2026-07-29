@@ -23,6 +23,25 @@ const CHILD_WORK_ITEM_TYPE = {
 // (validate_employee_story_field_restriction); it isn't the real boundary.
 const EMPLOYEE_STORY_EDITABLE_FIELDS = new Set(["custom_task_template"]);
 
+function lock_task_split_columns(frm) {
+	if (frm.is_new() || frm.doc.custom_work_item_type !== "Story") {
+		return;
+	}
+	frappe.call({
+		method: "sigzenjira.custom.task.get_task_split_permissions",
+		args: { project: frm.doc.project },
+		callback: function (r) {
+			frm.__task_split_perms = r.message || { allocate_hours: false, assign_users: false };
+			frm.fields_dict.custom_task_split.grid.update_docfield_property(
+				"expected_hours",
+				"read_only",
+				frm.__task_split_perms.allocate_hours ? 0 : 1
+			);
+			frm.fields_dict.custom_task_split.grid.refresh();
+		},
+	});
+}
+
 function lock_story_to_template_only(frm) {
 	if (frm.is_new() || frm.doc.custom_work_item_type !== "Story") {
 		return;
@@ -55,10 +74,6 @@ frappe.ui.form.on("Task", {
 			}
 		}
 
-		frm.fields_dict.custom_task_split.grid.cannot_add_rows =
-			!WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role));
-		frm.fields_dict.custom_task_split.grid.refresh();
-
 		frm.set_query("parent_task", function () {
 			const expected_parent_type = {
 				Epic: null,
@@ -83,6 +98,7 @@ frappe.ui.form.on("Task", {
 
 	refresh: function (frm) {
 		lock_story_to_template_only(frm);
+		lock_task_split_columns(frm);
 
 		// Only on an already-saved item - a not-yet-created Epic has no
 		// name yet to link a new child's parent_task to.
@@ -155,6 +171,11 @@ frappe.ui.form.on("Task", {
 // doctype_js hook, so registering the child doctype's events here works.
 frappe.ui.form.on("Task Split", {
 	assign_action: function (frm, cdt, cdn) {
+		if (frm.__task_split_perms && !frm.__task_split_perms.assign_users) {
+			frappe.msgprint(__("Only a user with Assign Users access on this Project can assign users on the Task Split table."));
+			return;
+		}
+
 		const row = locals[cdt][cdn];
 
 		const dialog = new frappe.ui.Dialog({
