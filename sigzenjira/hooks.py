@@ -7,11 +7,67 @@ app_license = "mit"
 
 fixtures = [
 	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project"]]]},
-	{"doctype": "Property Setter", "filters": [["doc_type", "=", "Task"]]},
-	{"doctype": "Report", "filters": [["report_name", "like", "PM %"]]},
-	{"doctype": "Number Card", "filters": [["label", "like", "PM %"]]},
-	{"doctype": "Dashboard Chart", "filters": [["chart_name", "like", "PM %"]]},
-	{"doctype": "Dashboard", "filters": [["dashboard_name", "like", "PM %"]]},
+	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue"]]]},
+	{
+		"doctype": "Report",
+		"filters": [
+			[
+				"report_name",
+				"in",
+				[
+					"Open Tasks Count",
+					"Overdue Tasks Count",
+					"Pending Extra Hours Count",
+					"Extra Hours Approved Sum",
+					"Hours This Week Sum",
+					"Open Issues Count",
+				],
+			]
+		],
+	},
+	{
+		"doctype": "Number Card",
+		"filters": [
+			[
+				"label",
+				"in",
+				[
+					"Open Tasks",
+					"Task Overdue Count",
+					"Pending Extra Hours Approvals",
+					"Extra Hours Approved",
+					"Hours Logged This Week",
+					"Open Issues",
+					"My Open Tasks",
+					"My Overdue Tasks",
+					"My Hours This Week",
+					"My Pending Extra Hours Requests",
+					"My Approved Extra Hours",
+					"My Open Issues",
+				],
+			]
+		],
+	},
+	{
+		"doctype": "Dashboard Chart",
+		"filters": [
+			[
+				"chart_name",
+				"in",
+				[
+					"Tasks by Status",
+					"Tasks by Work Item Type Breakdown",
+					"Issues by Status",
+					"Workload Distribution",
+					"Hours Logged Trend",
+					"My Tasks by Status",
+					"My Issues by Status",
+					"My Hours Trend",
+				],
+			]
+		],
+	},
+	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
 ]
 
 # Apps

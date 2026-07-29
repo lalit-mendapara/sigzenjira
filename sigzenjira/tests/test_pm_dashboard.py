@@ -11,12 +11,12 @@ class TestPMDashboardReports(IntegrationTestCase):
 		create_pm_dashboard_reports()
 
 		expected = [
-			"PM Open Tasks Count",
-			"PM Overdue Tasks Count",
-			"PM Pending Extra Hours Count",
-			"PM Extra Hours Approved Sum",
-			"PM Hours This Week Sum",
-			"PM Open Issues Count",
+			"Open Tasks Count",
+			"Overdue Tasks Count",
+			"Pending Extra Hours Count",
+			"Extra Hours Approved Sum",
+			"Hours This Week Sum",
+			"Open Issues Count",
 		]
 		for name in expected:
 			self.assertTrue(frappe.db.exists("Report", name), f"missing report {name}")
@@ -32,10 +32,18 @@ class TestPMDashboardReports(IntegrationTestCase):
 			self.assertGreaterEqual(row[0]["value"] or 0, 0)
 
 	def test_idempotent_on_rerun(self):
+		report_names = [
+			"Open Tasks Count",
+			"Overdue Tasks Count",
+			"Pending Extra Hours Count",
+			"Extra Hours Approved Sum",
+			"Hours This Week Sum",
+			"Open Issues Count",
+		]
 		create_pm_dashboard_reports()
-		count_before = frappe.db.count("Report", {"report_name": ["like", "PM %"]})
+		count_before = frappe.db.count("Report", {"report_name": ["in", report_names]})
 		create_pm_dashboard_reports()
-		count_after = frappe.db.count("Report", {"report_name": ["like", "PM %"]})
+		count_after = frappe.db.count("Report", {"report_name": ["in", report_names]})
 		self.assertEqual(count_before, count_after)
 
 
@@ -45,20 +53,20 @@ class TestPMDashboardCards(IntegrationTestCase):
 		create_pm_dashboard_cards()
 
 		report_backed = [
-			"PM Open Tasks",
-			"PM Overdue Tasks",
-			"PM Pending Extra Hours Approvals",
-			"PM Extra Hours Approved",
-			"PM Hours Logged This Week",
-			"PM Open Issues",
+			"Open Tasks",
+			"Task Overdue Count",
+			"Pending Extra Hours Approvals",
+			"Extra Hours Approved",
+			"Hours Logged This Week",
+			"Open Issues",
 		]
 		doctype_backed = [
-			"PM My Open Tasks",
-			"PM My Overdue Tasks",
-			"PM My Hours This Week",
-			"PM My Pending Extra Hours Requests",
-			"PM My Approved Extra Hours",
-			"PM My Open Issues",
+			"My Open Tasks",
+			"My Overdue Tasks",
+			"My Hours This Week",
+			"My Pending Extra Hours Requests",
+			"My Approved Extra Hours",
+			"My Open Issues",
 		]
 
 		for label in report_backed:
@@ -76,16 +84,30 @@ class TestPMDashboardCards(IntegrationTestCase):
 		create_pm_dashboard_cards()
 		from frappe.desk.doctype.number_card.number_card import get_result
 
-		card = frappe.get_doc("Number Card", "PM My Open Tasks").as_dict()
+		card = frappe.get_doc("Number Card", "My Open Tasks").as_dict()
 		result = get_result(doc=frappe.as_json(card), filters=card.get("filters_json"))
 		self.assertGreaterEqual(result, 0)
 
 	def test_cards_idempotent_on_rerun(self):
+		card_labels = [
+			"Open Tasks",
+			"Task Overdue Count",
+			"Pending Extra Hours Approvals",
+			"Extra Hours Approved",
+			"Hours Logged This Week",
+			"Open Issues",
+			"My Open Tasks",
+			"My Overdue Tasks",
+			"My Hours This Week",
+			"My Pending Extra Hours Requests",
+			"My Approved Extra Hours",
+			"My Open Issues",
+		]
 		create_pm_dashboard_reports()
 		create_pm_dashboard_cards()
-		count_before = frappe.db.count("Number Card", {"label": ["like", "PM %"]})
+		count_before = frappe.db.count("Number Card", {"label": ["in", card_labels]})
 		create_pm_dashboard_cards()
-		count_after = frappe.db.count("Number Card", {"label": ["like", "PM %"]})
+		count_after = frappe.db.count("Number Card", {"label": ["in", card_labels]})
 		self.assertEqual(count_before, count_after)
 
 
@@ -104,16 +126,16 @@ class TestPMDashboardCharts(IntegrationTestCase):
 		create_pm_dashboard_charts()
 
 		manager_only = [
-			"PM Tasks by Status",
-			"PM Tasks by Work Item Type",
-			"PM Issues by Status",
-			"PM Workload Distribution",
-			"PM Hours Logged Trend",
+			"Tasks by Status",
+			"Tasks by Work Item Type Breakdown",
+			"Issues by Status",
+			"Workload Distribution",
+			"Hours Logged Trend",
 		]
 		my_work = [
-			"PM My Tasks by Status",
-			"PM My Issues by Status",
-			"PM My Hours Trend",
+			"My Tasks by Status",
+			"My Issues by Status",
+			"My Hours Trend",
 		]
 
 		for name in manager_only:
@@ -128,14 +150,24 @@ class TestPMDashboardCharts(IntegrationTestCase):
 		create_pm_dashboard_charts()
 		from frappe.desk.doctype.dashboard_chart.dashboard_chart import get as get_chart_config
 
-		config = get_chart_config(chart_name="PM Tasks by Status")
+		config = get_chart_config(chart_name="Tasks by Status")
 		self.assertIsInstance(config, dict)
 
 	def test_charts_idempotent_on_rerun(self):
+		chart_names = [
+			"Tasks by Status",
+			"Tasks by Work Item Type Breakdown",
+			"Issues by Status",
+			"Workload Distribution",
+			"Hours Logged Trend",
+			"My Tasks by Status",
+			"My Issues by Status",
+			"My Hours Trend",
+		]
 		create_pm_dashboard_charts()
-		count_before = frappe.db.count("Dashboard Chart", {"chart_name": ["like", "PM %"]})
+		count_before = frappe.db.count("Dashboard Chart", {"chart_name": ["in", chart_names]})
 		create_pm_dashboard_charts()
-		count_after = frappe.db.count("Dashboard Chart", {"chart_name": ["like", "PM %"]})
+		count_after = frappe.db.count("Dashboard Chart", {"chart_name": ["in", chart_names]})
 		self.assertEqual(count_before, count_after)
 
 
@@ -143,28 +175,28 @@ class TestPMDashboard(IntegrationTestCase):
 	def test_dashboard_links_all_cards_and_charts(self):
 		create_pm_dashboard()
 
-		dashboard = frappe.get_doc("Dashboard", "PM Project Management Dashboard")
+		dashboard = frappe.get_doc("Dashboard", "Project Management Dashboard")
 		self.assertEqual(len(dashboard.cards), 12)
 		self.assertEqual(len(dashboard.charts), 8)
 
 		card_names = {row.card for row in dashboard.cards}
-		self.assertIn("PM Open Tasks", card_names)
-		self.assertIn("PM My Open Tasks", card_names)
+		self.assertIn("Open Tasks", card_names)
+		self.assertIn("My Open Tasks", card_names)
 
 		chart_names = {row.chart for row in dashboard.charts}
-		self.assertIn("PM Tasks by Status", chart_names)
-		self.assertIn("PM My Tasks by Status", chart_names)
+		self.assertIn("Tasks by Status", chart_names)
+		self.assertIn("My Tasks by Status", chart_names)
 
 	def test_workspace_shortcut_added_once(self):
 		create_pm_dashboard()
 		ws = frappe.get_doc("Workspace", "Project Management")
-		matches = [row for row in ws.shortcuts if row.link_to == "PM Project Management Dashboard"]
+		matches = [row for row in ws.shortcuts if row.link_to == "Project Management Dashboard"]
 		self.assertEqual(len(matches), 1)
 		self.assertEqual(matches[0].type, "Dashboard")
 
 		create_pm_dashboard()  # re-run must not duplicate the shortcut
 		ws_again = frappe.get_doc("Workspace", "Project Management")
-		matches_again = [row for row in ws_again.shortcuts if row.link_to == "PM Project Management Dashboard"]
+		matches_again = [row for row in ws_again.shortcuts if row.link_to == "Project Management Dashboard"]
 		self.assertEqual(len(matches_again), 1)
 
 	def test_workspace_content_block_added_once(self):
@@ -175,7 +207,7 @@ class TestPMDashboard(IntegrationTestCase):
 			return [
 				block
 				for block in content
-				if block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == "PM Dashboard"
+				if block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == "Dashboard"
 			]
 
 		self.assertEqual(len(shortcut_blocks()), 1)

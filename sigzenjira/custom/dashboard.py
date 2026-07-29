@@ -5,7 +5,7 @@ MY_WORK_ROLES = ["Projects User", "Projects Manager"]
 def get_query_reports():
 	return [
 		{
-			"report_name": "PM Open Tasks Count",
+			"report_name": "Open Tasks Count",
 			"ref_doctype": "Task",
 			"query": (
 				"select count(*) as value from `tabTask` "
@@ -13,12 +13,12 @@ def get_query_reports():
 			),
 		},
 		{
-			"report_name": "PM Overdue Tasks Count",
+			"report_name": "Overdue Tasks Count",
 			"ref_doctype": "Task",
 			"query": "select count(*) as value from `tabTask` where status = 'Overdue'",
 		},
 		{
-			"report_name": "PM Pending Extra Hours Count",
+			"report_name": "Pending Extra Hours Count",
 			"ref_doctype": "Additional Hours Request",
 			"query": (
 				"select count(*) as value from `tabAdditional Hours Request` "
@@ -26,7 +26,7 @@ def get_query_reports():
 			),
 		},
 		{
-			"report_name": "PM Extra Hours Approved Sum",
+			"report_name": "Extra Hours Approved Sum",
 			"ref_doctype": "Additional Hours Request",
 			"query": (
 				"select coalesce(sum(additional_hours_requested), 0) as value "
@@ -34,7 +34,7 @@ def get_query_reports():
 			),
 		},
 		{
-			"report_name": "PM Hours This Week Sum",
+			"report_name": "Hours This Week Sum",
 			"ref_doctype": "Timesheet",
 			"query": (
 				"select coalesce(sum(total_hours), 0) as value from `tabTimesheet` "
@@ -42,7 +42,7 @@ def get_query_reports():
 			),
 		},
 		{
-			"report_name": "PM Open Issues Count",
+			"report_name": "Open Issues Count",
 			"ref_doctype": "Issue",
 			"query": (
 				"select count(*) as value from `tabIssue` "
@@ -58,50 +58,50 @@ def get_number_cards():
 	return [
 		# Manager-only, Report-backed (roles come from the backing Report)
 		{
-			"label": "PM Open Tasks",
+			"label": "Open Tasks",
 			"type": "Report",
-			"report_name": "PM Open Tasks Count",
+			"report_name": "Open Tasks Count",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		{
-			"label": "PM Overdue Tasks",
+			"label": "Task Overdue Count",
 			"type": "Report",
-			"report_name": "PM Overdue Tasks Count",
+			"report_name": "Overdue Tasks Count",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		{
-			"label": "PM Pending Extra Hours Approvals",
+			"label": "Pending Extra Hours Approvals",
 			"type": "Report",
-			"report_name": "PM Pending Extra Hours Count",
+			"report_name": "Pending Extra Hours Count",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		{
-			"label": "PM Extra Hours Approved",
+			"label": "Extra Hours Approved",
 			"type": "Report",
-			"report_name": "PM Extra Hours Approved Sum",
+			"report_name": "Extra Hours Approved Sum",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		{
-			"label": "PM Hours Logged This Week",
+			"label": "Hours Logged This Week",
 			"type": "Report",
-			"report_name": "PM Hours This Week Sum",
+			"report_name": "Hours This Week Sum",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		{
-			"label": "PM Open Issues",
+			"label": "Open Issues",
 			"type": "Report",
-			"report_name": "PM Open Issues Count",
+			"report_name": "Open Issues Count",
 			"report_field": "value",
 			"report_function": "Sum",
 		},
 		# "My work" — Document Type, visible to everyone, scoped to the viewer
 		{
-			"label": "PM My Open Tasks",
+			"label": "My Open Tasks",
 			"type": "Document Type",
 			"document_type": "Task",
 			"function": "Count",
@@ -109,7 +109,7 @@ def get_number_cards():
 			"dynamic_filters": me_assign_filter("Task"),
 		},
 		{
-			"label": "PM My Overdue Tasks",
+			"label": "My Overdue Tasks",
 			"type": "Document Type",
 			"document_type": "Task",
 			"function": "Count",
@@ -117,7 +117,7 @@ def get_number_cards():
 			"dynamic_filters": me_assign_filter("Task"),
 		},
 		{
-			"label": "PM My Hours This Week",
+			"label": "My Hours This Week",
 			"type": "Document Type",
 			"document_type": "Timesheet",
 			"function": "Sum",
@@ -129,7 +129,7 @@ def get_number_cards():
 			],
 		},
 		{
-			"label": "PM My Pending Extra Hours Requests",
+			"label": "My Pending Extra Hours Requests",
 			"type": "Document Type",
 			"document_type": "Additional Hours Request",
 			"function": "Count",
@@ -137,7 +137,7 @@ def get_number_cards():
 			"dynamic_filters": [["Additional Hours Request", "requested_by", "=", "frappe.session.user"]],
 		},
 		{
-			"label": "PM My Approved Extra Hours",
+			"label": "My Approved Extra Hours",
 			"type": "Document Type",
 			"document_type": "Additional Hours Request",
 			"function": "Sum",
@@ -146,7 +146,7 @@ def get_number_cards():
 			"dynamic_filters": [["Additional Hours Request", "requested_by", "=", "frappe.session.user"]],
 		},
 		{
-			"label": "PM My Open Issues",
+			"label": "My Open Issues",
 			"type": "Document Type",
 			"document_type": "Issue",
 			"function": "Count",
@@ -161,7 +161,7 @@ def get_dashboard_charts():
 
 	return [
 		{
-			"chart_name": "PM Tasks by Status",
+			"chart_name": "Tasks by Status",
 			"chart_type": "Group By",
 			"document_type": "Task",
 			"group_by_based_on": "status",
@@ -171,7 +171,7 @@ def get_dashboard_charts():
 			"filters": [],
 		},
 		{
-			"chart_name": "PM Tasks by Work Item Type",
+			"chart_name": "Tasks by Work Item Type Breakdown",
 			"chart_type": "Group By",
 			"document_type": "Task",
 			"group_by_based_on": "custom_work_item_type",
@@ -181,7 +181,7 @@ def get_dashboard_charts():
 			"filters": [],
 		},
 		{
-			"chart_name": "PM Issues by Status",
+			"chart_name": "Issues by Status",
 			"chart_type": "Group By",
 			"document_type": "Issue",
 			"group_by_based_on": "status",
@@ -191,7 +191,7 @@ def get_dashboard_charts():
 			"filters": [],
 		},
 		{
-			"chart_name": "PM Workload Distribution",
+			"chart_name": "Workload Distribution",
 			"chart_type": "Group By",
 			"document_type": "ToDo",
 			"group_by_based_on": "allocated_to",
@@ -201,7 +201,7 @@ def get_dashboard_charts():
 			"filters": [["ToDo", "reference_type", "=", "Task"], ["ToDo", "status", "=", "Open"]],
 		},
 		{
-			"chart_name": "PM Hours Logged Trend",
+			"chart_name": "Hours Logged Trend",
 			"chart_type": "Sum",
 			"document_type": "Timesheet",
 			"value_based_on": "total_hours",
@@ -214,7 +214,7 @@ def get_dashboard_charts():
 			"filters": [["Timesheet", "docstatus", "=", 1]],
 		},
 		{
-			"chart_name": "PM My Tasks by Status",
+			"chart_name": "My Tasks by Status",
 			"chart_type": "Group By",
 			"document_type": "Task",
 			"group_by_based_on": "status",
@@ -225,7 +225,7 @@ def get_dashboard_charts():
 			"dynamic_filters": me_assign_filter("Task"),
 		},
 		{
-			"chart_name": "PM My Issues by Status",
+			"chart_name": "My Issues by Status",
 			"chart_type": "Group By",
 			"document_type": "Issue",
 			"group_by_based_on": "status",
@@ -236,7 +236,7 @@ def get_dashboard_charts():
 			"dynamic_filters": me_assign_filter("Issue"),
 		},
 		{
-			"chart_name": "PM My Hours Trend",
+			"chart_name": "My Hours Trend",
 			"chart_type": "Sum",
 			"document_type": "Timesheet",
 			"value_based_on": "total_hours",
@@ -253,12 +253,12 @@ def get_dashboard_charts():
 
 
 def get_dashboard():
-	trend_charts = {"PM Hours Logged Trend", "PM My Hours Trend"}
+	trend_charts = {"Hours Logged Trend", "My Hours Trend"}
 	card_names = [card["label"] for card in get_number_cards()]
 	chart_names = [chart["chart_name"] for chart in get_dashboard_charts()]
 
 	return {
-		"dashboard_name": "PM Project Management Dashboard",
+		"dashboard_name": "Project Management Dashboard",
 		"cards": [{"card": name} for name in card_names],
 		"charts": [
 			{"chart": name, "width": "Full" if name in trend_charts else "Half"} for name in chart_names
@@ -268,7 +268,7 @@ def get_dashboard():
 
 def get_workspace_shortcut():
 	return {
-		"label": "PM Dashboard",
+		"label": "Dashboard",
 		"type": "Dashboard",
-		"link_to": "PM Project Management Dashboard",
+		"link_to": "Project Management Dashboard",
 	}
