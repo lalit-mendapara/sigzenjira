@@ -218,6 +218,7 @@ doc_events = {
 			"sigzenjira.custom.task.rollup_story_expected_time",
 			"sigzenjira.custom.task.validate_hour_budget",
 			"sigzenjira.custom.task.validate_expected_time_edit_permission",
+			"sigzenjira.custom.task.sync_actual_extra_hours",
 		],
 		"on_update": [
 			"sigzenjira.custom.task.generate_tasks_from_split",

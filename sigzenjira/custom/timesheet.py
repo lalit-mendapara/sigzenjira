@@ -38,17 +38,23 @@ def recompute_actual_time(task_name):
 		task_name,
 	)[0]
 
+	actual_time = flt(direct_hours) + flt(children_hours)
+	expected_time = frappe.db.get_value("Task", task_name, "expected_time")
+
 	frappe.db.set_value(
 		"Task",
 		task_name,
 		{
-			"actual_time": flt(direct_hours) + flt(children_hours),
+			"actual_time": actual_time,
 			# Reuses core's total_costing_amount/total_billing_amount fields (base
 			# currency) — core only sums this task's own direct timesheet rows; we
 			# extend both to also fold in child Sub-task/Task amounts, same rollup
 			# shape as actual_time.
 			"total_costing_amount": flt(direct_costing) + flt(children_costing),
 			"total_billing_amount": flt(direct_billing) + flt(children_billing),
+			# Positive = over budget, negative = under. No floor at zero — that's
+			# the useful signal.
+			"custom_actual_extra_hours": actual_time - flt(expected_time),
 		},
 		update_modified=False,
 	)

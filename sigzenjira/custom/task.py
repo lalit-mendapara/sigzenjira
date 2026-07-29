@@ -129,6 +129,14 @@ def validate_expected_time_edit_permission(doc, method):
 		frappe.throw(_("Only a Projects Manager can set or change Expected Time on an Epic."))
 
 
+def sync_actual_extra_hours(doc, method):
+	# recompute_actual_time (custom/timesheet.py) covers the Timesheet-driven
+	# path via a raw db.set_value that bypasses validate(); this covers a plain
+	# doc.save() that only changes expected_time. Positive = over budget,
+	# negative = under - no floor at zero.
+	doc.custom_actual_extra_hours = flt(doc.actual_time) - flt(doc.expected_time)
+
+
 def validate_task_split_add_row_permission(doc, method):
 	# Same privileged-role gate as classification itself (custom_task_split
 	# only exists on a Story, and only a privileged role can make one a

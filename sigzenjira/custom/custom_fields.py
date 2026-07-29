@@ -42,6 +42,14 @@ def get_custom_fields():
 				"no_copy": 1,
 			},
 			{
+				"fieldname": "custom_actual_extra_hours",
+				"label": "Actual Extra Hours",
+				"fieldtype": "Float",
+				"insert_after": "actual_time",
+				"read_only": 1,
+				"no_copy": 1,
+			},
+			{
 				"fieldname": "custom_issue_type",
 				"label": "Issue Type",
 				"fieldtype": "Link",
