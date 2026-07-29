@@ -14,4 +14,13 @@ sigzenjira.patches.v0_0.grant_task_template_director_po_access
 sigzenjira.patches.v0_0.allow_task_split_add_row
 sigzenjira.patches.v0_0.make_depends_on_readonly
 sigzenjira.patches.v0_0.add_project_extra_hours_approver_field
+sigzenjira.patches.v0_0.set_task_and_issue_status_options
 sigzenjira.patches.v0_0.create_pm_dashboard
+sigzenjira.patches.v0_0.add_issue_type_field
+sigzenjira.patches.v0_0.grant_task_template_employee_access
+sigzenjira.patches.v0_0.backfill_task_split_assign_ecd
+sigzenjira.patches.v0_0.create_pm_kanban_boards
+sigzenjira.patches.v0_0.add_issue_status_kanban_board
+sigzenjira.patches.v0_0.remove_task_project_name_field
+sigzenjira.patches.v0_0.remove_work_item_hierarchy_board
+sigzenjira.patches.v0_0.wire_project_user_hour_flags

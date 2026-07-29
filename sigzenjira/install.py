@@ -6,16 +6,23 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 
 from sigzenjira.custom.custom_fields import get_custom_fields
 from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get_dashboard_charts, get_dashboard, get_workspace_shortcut
+from sigzenjira.custom.kanban import get_kanban_boards
 
 
 def after_install():
 	create_custom_fields(get_custom_fields(), update=True)
 	set_task_search_fields()
+	set_task_status_options()
+	set_issue_status_options()
 	create_task_projects_manager_docperm()
 	create_task_template_director_po_docperm()
+	create_task_template_employee_docperm()
 	create_additional_hours_request_workflow()
 	create_pm_dashboard()
+	create_kanban_board_docperm()
+	create_pm_kanban_boards()
 	frappe.clear_cache(doctype="Task")
+	frappe.clear_cache(doctype="Issue")
 
 
 def set_task_search_fields():
@@ -24,6 +31,18 @@ def set_task_search_fields():
 	# frappe/desk/search.py). This makes the parent_task picker show the
 	# work item type next to every Task without adding any field.
 	make_property_setter("Task", None, "search_fields", "subject,custom_work_item_type", "Data", for_doctype=True)
+
+
+TASK_STATUS_OPTIONS = "Open\nWorking\nPending Review\nOverdue\nTemplate\nCompleted\nCancelled\nBlocked"
+ISSUE_STATUS_OPTIONS = "Open\nWIP\nIN-QA\nIN-UAT\nResolved\nOn Hold\nClosed"
+
+
+def set_task_status_options():
+	make_property_setter("Task", "status", "options", TASK_STATUS_OPTIONS, "Select")
+
+
+def set_issue_status_options():
+	make_property_setter("Issue", "status", "options", ISSUE_STATUS_OPTIONS, "Select")
 
 
 PERM_FLAG_FIELDS = [
@@ -129,6 +148,28 @@ def create_task_template_director_po_docperm():
 				"print": 1,
 			}
 		).insert(ignore_permissions=True)
+
+
+def create_task_template_employee_docperm():
+	# Employee needs to SELECT an existing Task Template on a Story (see
+	# validate_employee_story_field_restriction, custom/task.py) but must
+	# never create/edit/delete one - read only, no create/write/delete.
+	if frappe.db.exists("Custom DocPerm", {"parent": "Task Template", "role": "Employee"}):
+		return
+
+	frappe.get_doc(
+		{
+			"doctype": "Custom DocPerm",
+			"parent": "Task Template",
+			"parenttype": "DocType",
+			"parentfield": "permissions",
+			"role": "Employee",
+			"read": 1,
+			"write": 0,
+			"create": 0,
+			"delete": 0,
+		}
+	).insert(ignore_permissions=True)
 
 
 def create_additional_hours_request_workflow():
@@ -265,3 +306,85 @@ def add_pm_dashboard_workspace_shortcut():
 			}
 		)
 		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
+
+
+def create_kanban_board_docperm():
+	# Core Kanban Board only grants read to Desk User / System Manager, and no
+	# sigzenjira role holds Desk User — so without this, nobody but System
+	# Manager can open any Kanban board. Same Custom DocPerm gotcha as
+	# create_task_projects_manager_docperm: mirror existing rows first.
+	for perm in frappe.get_all("DocPerm", filters={"parent": "Kanban Board"}, fields=["role", *PERM_FLAG_FIELDS]):
+		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": perm.role, "permlevel": perm.permlevel}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": "Kanban Board",
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				**perm,
+			}
+		).insert(ignore_permissions=True)
+
+	for role in ("Employee", "Projects User"):
+		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": role}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": "Kanban Board",
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				"role": role,
+				"read": 1,
+			}
+		).insert(ignore_permissions=True)
+
+	for role in ("Director", "Product Owner", "Projects Manager"):
+		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": role}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": "Kanban Board",
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				"role": role,
+				"read": 1,
+				"write": 1,
+				"create": 1,
+				"delete": 0,
+				"report": 1,
+				"export": 1,
+			}
+		).insert(ignore_permissions=True)
+
+
+def create_pm_kanban_boards():
+	# `fields`/`show_labels` control which extra fields render on each card
+	# (frappe.desk.doctype.kanban_board.kanban_board.save_settings does the
+	# same doc.fields = json.dumps(...) assignment despite both being
+	# read_only in the DocType - that flag only blocks user-driven form
+	# edits, not programmatic writes). Re-applied on every call (not just at
+	# creation) so a later change to get_kanban_boards()'s field list reaches
+	# boards that already exist on this site via the patch re-running.
+	for board in get_kanban_boards():
+		name = board["kanban_board_name"]
+		card_settings = {
+			"filters": frappe.as_json(board["filters"]),
+			"fields": frappe.as_json(board["fields"]),
+			"show_labels": board["show_labels"],
+		}
+		if frappe.db.exists("Kanban Board", name):
+			frappe.db.set_value("Kanban Board", name, card_settings)
+			continue
+		doc_dict = {
+			"doctype": "Kanban Board",
+			"kanban_board_name": name,
+			"reference_doctype": board["reference_doctype"],
+			"field_name": board["field_name"],
+			"private": board["private"],
+			"columns": [{"column_name": column} for column in board["columns"]],
+			**card_settings,
+		}
+		frappe.get_doc(doc_dict).insert(ignore_permissions=True)

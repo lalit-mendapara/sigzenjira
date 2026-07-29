@@ -1,7 +1,10 @@
+import json
+
 import frappe
 from frappe import _
+from frappe.desk.form import assign_to
 from frappe.model.naming import make_autoname
-from frappe.utils import flt, get_link_to_form
+from frappe.utils import flt, get_link_to_form, getdate
 
 WORK_ITEM_TYPE_NAME_PREFIX = {
 	"Epic": "E",
@@ -57,6 +60,11 @@ def validate_work_item_type_permission(doc, method):
 	# save OTHER edits (status, progress) on an existing higher-level item
 	# without this rule getting in the way - it only fires when they
 	# actually try to set/change the classification itself.
+	if doc.flags.via_issue_mapping:
+		# Classification was set by make_story(), not chosen by the user -
+		# the manual Director/PO/Projects Manager gate doesn't apply here.
+		return
+
 	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
 		return
 
@@ -137,8 +145,77 @@ def validate_task_split_add_row_permission(doc, method):
 	existing_row_names = {row.name for row in (before.custom_task_split if before else [])}
 	new_rows = [row for row in (doc.get("custom_task_split") or []) if row.name not in existing_row_names]
 
-	if new_rows:
+	# A Task Template picker (task.js custom_task_template handler) stubs
+	# rows with no expected_hours yet - that's a checklist, not a budget
+	# commitment, so it's the one thing an Employee is allowed to do on a
+	# Story (see validate_employee_story_field_restriction below). Only rows
+	# that already carry hours need the privileged-role gate.
+	new_rows_with_hours = [row for row in new_rows if flt(row.expected_hours)]
+	if new_rows_with_hours:
 		frappe.throw(_("Only a Director, Product Owner, or Projects Manager can add rows to the Task Split table."))
+
+
+def validate_one_story_per_issue(doc, method):
+	# An Issue maps to exactly one live Story - a second make_story() call (or
+	# a manually created Story) on the same Issue would leave two Stories
+	# both claiming to be "the" story for that Issue.
+	if doc.custom_work_item_type != "Story" or not doc.issue:
+		return
+
+	existing = frappe.db.exists(
+		"Task",
+		{
+			"issue": doc.issue,
+			"custom_work_item_type": "Story",
+			"name": ["!=", doc.name or ""],
+			"docstatus": ["!=", 2],
+		},
+	)
+	if existing:
+		frappe.throw(
+			_("Issue {0} already has a Story: {1}.").format(doc.issue, get_link_to_form("Task", existing))
+		)
+
+
+def sync_issue_status_on_story_completion(doc, method):
+	# Direct-save path only (user marks the Story itself Completed) - cascade
+	# auto-completion from children deliberately does NOT close the Issue.
+	if doc.custom_work_item_type != "Story" or not doc.issue or doc.status != "Completed":
+		return
+
+	if frappe.db.get_value("Issue", doc.issue, "status") != "Resolved":
+		frappe.db.set_value("Issue", doc.issue, "status", "Resolved")
+
+
+EMPLOYEE_STORY_LOCKED_EXCEPTIONS = {"custom_task_template", "expected_time"}
+# expected_time is excepted because rollup_story_expected_time recomputes it
+# automatically from custom_task_split whenever rows change - it's a derived
+# side effect of picking a template, not something the Employee sets directly.
+
+
+def validate_employee_story_field_restriction(doc, method):
+	# A Story always already exists by the time an Employee can reach it
+	# (validate_work_item_type_permission keeps them from creating one from
+	# scratch) - the one thing they're allowed to do on it is pick a Task
+	# Template. Everything else - subject, priority, dates, status, the
+	# split table's row content - stays whoever created/owns the Story's call.
+	if doc.is_new() or doc.custom_work_item_type != "Story":
+		return
+
+	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
+		return
+
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+
+	for df in doc.meta.fields:
+		if df.fieldtype in ("Table", "Section Break", "Column Break", "Tab Break"):
+			continue
+		if df.fieldname in EMPLOYEE_STORY_LOCKED_EXCEPTIONS:
+			continue
+		if doc.get(df.fieldname) != before.get(df.fieldname):
+			frappe.throw(_("You can only select a Task Template on this Story."))
 
 
 def rollup_story_expected_time(doc, method):
@@ -172,6 +249,12 @@ def sync_split_row_edits_to_generated_task(doc, method):
 			continue
 		if flt(row.expected_hours) != flt(frappe.db.get_value("Task", row.generated_task, "expected_time")):
 			frappe.db.set_value("Task", row.generated_task, "expected_time", flt(row.expected_hours), update_modified=False)
+
+		task_exp_end_date = frappe.db.get_value("Task", row.generated_task, "exp_end_date")
+		current_ecd = getdate(task_exp_end_date) if task_exp_end_date else None
+		row_ecd = getdate(row.ecd) if row.ecd else None
+		if row_ecd != current_ecd:
+			frappe.db.set_value("Task", row.generated_task, "exp_end_date", row_ecd, update_modified=False)
 
 
 def validate_hour_budget(doc, method):
@@ -249,10 +332,20 @@ def generate_tasks_from_split(doc, method):
 				"custom_work_item_type": "Task",
 				"expected_time": row.expected_hours,
 				"priority": doc.priority,
+				"exp_end_date": row.ecd,
 			}
 		).insert(ignore_permissions=True)
 
 		frappe.db.set_value("Task Split", row.name, "generated_task", task.name)
+
+		# Picks staged before the row generated (task_split.js's Assign
+		# dialog, no generated_task yet -> pending_assign_users) become real
+		# assignment the moment the Task exists - same Story save, no extra
+		# round trip needed.
+		for user in json.loads(row.pending_assign_users) if row.pending_assign_users else []:
+			assign_to._add({"assign_to": [user], "doctype": "Task", "name": task.name}, ignore_permissions=True)
+		if row.pending_assign_users:
+			frappe.db.set_value("Task Split", row.name, "pending_assign_users", None)
 
 
 def sync_expected_hours_to_split_row(doc, method):
@@ -268,12 +361,39 @@ def sync_expected_hours_to_split_row(doc, method):
 		return
 
 	row_name, story_name = split_row
-	frappe.db.set_value("Task Split", row_name, "expected_hours", doc.expected_time)
+	frappe.db.set_value(
+		"Task Split",
+		row_name,
+		{
+			"expected_hours": doc.expected_time,
+			"ecd": getdate(doc.exp_end_date) if doc.exp_end_date else None,
+		},
+	)
 
 	story_total = flt(
 		frappe.db.sql("select sum(expected_hours) from `tabTask Split` where parent = %s", story_name)[0][0]
 	)
 	frappe.db.set_value("Task", story_name, "expected_time", story_total, update_modified=False)
+
+
+@frappe.whitelist()
+def set_split_row_assignees(row_name, users):
+	# The grid's Assign button/dialog (task_split.js) is the only write path
+	# for a row's assignment - real user action, so ignore_permissions=False
+	# (unlike the background sync hooks above, which run as the system).
+	users = set(frappe.parse_json(users))
+	generated_task = frappe.db.get_value("Task Split", row_name, "generated_task")
+	if not generated_task:
+		frappe.throw(_("This row hasn't generated a Task yet."))
+
+	raw_assign = frappe.db.get_value("Task", generated_task, "_assign")
+	current_users = set(json.loads(raw_assign) if raw_assign else [])
+
+	for user in users - current_users:
+		assign_to.add({"assign_to": [user], "doctype": "Task", "name": generated_task})
+
+	for user in current_users - users:
+		assign_to.remove("Task", generated_task, user)
 
 
 def cleanup_task_references_on_delete(doc, method):

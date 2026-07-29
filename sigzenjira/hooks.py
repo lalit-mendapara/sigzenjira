@@ -6,7 +6,7 @@ app_email = "lalit@gmail.com"
 app_license = "mit"
 
 fixtures = [
-	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project"]]]},
+	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User"]]]},
 	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue"]]]},
 	{
 		"doctype": "Report",
@@ -68,6 +68,8 @@ fixtures = [
 		],
 	},
 	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
+	{"doctype": "Kanban Board", "filters": [["reference_doctype", "=", "Task"]]},
+	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template", "Kanban Board"]]]},
 ]
 
 # Apps
@@ -108,8 +110,8 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Task": "public/js/task.js", "Timesheet": "public/js/timesheet.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_js = {"Task": "public/js/task.js", "Timesheet": "public/js/timesheet.js", "Issue": "public/js/issue.js"}
+doctype_list_js = {"Task": "public/js/task_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -210,7 +212,9 @@ doc_events = {
 		"validate": [
 			"sigzenjira.custom.task.validate_work_item_type_permission",
 			"sigzenjira.custom.task.validate_hierarchy",
+			"sigzenjira.custom.task.validate_one_story_per_issue",
 			"sigzenjira.custom.task.validate_task_split_add_row_permission",
+			"sigzenjira.custom.task.validate_employee_story_field_restriction",
 			"sigzenjira.custom.task.rollup_story_expected_time",
 			"sigzenjira.custom.task.validate_hour_budget",
 			"sigzenjira.custom.task.validate_expected_time_edit_permission",
@@ -220,9 +224,15 @@ doc_events = {
 			"sigzenjira.custom.task.sync_split_row_edits_to_generated_task",
 			"sigzenjira.custom.task.sync_expected_hours_to_split_row",
 			"sigzenjira.custom.task.cascade_completion_to_parent",
+			"sigzenjira.custom.task.sync_issue_status_on_story_completion",
 			"sigzenjira.custom.timesheet.rollup_actual_time_on_reparent",
 		],
 		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
+	},
+	"ToDo": {
+		"after_insert": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
+		"on_update": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
+		"on_trash": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
 	},
 	"Timesheet": {
 		"validate": "sigzenjira.custom.timesheet.validate_task_type",

@@ -7,10 +7,14 @@
  "field_order": [
   "task_item",
   "description",
+  "assign",
+  "assign_action",
+  "ecd",
   "expected_hours",
   "extra_hours",
   "generated_task",
-  "is_generating"
+  "is_generating",
+  "pending_assign_users"
  ],
  "fields": [
   {
@@ -29,6 +33,29 @@
    "in_list_view": 1,
    "label": "Description",
    "read_only_depends_on": "eval:doc.generated_task"
+  },
+  {
+   "columns": 3,
+   "fieldname": "assign",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Assign",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "assign_action",
+   "fieldtype": "Button",
+   "in_list_view": 1,
+   "label": "+"
+  },
+  {
+   "columns": 2,
+   "fieldname": "ecd",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "ECD"
   },
   {
    "columns": 2,
@@ -64,6 +91,13 @@
    "label": "Is Generating",
    "no_copy": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "pending_assign_users",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Pending Assign Users",
+   "no_copy": 1
   }
  ],
  "istable": 1,

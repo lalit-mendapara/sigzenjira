@@ -1,13 +1,26 @@
 def get_custom_fields():
 	return {
-		"Project": [
+		"Project User": [
 			{
-				"fieldname": "custom_extra_hours_approver",
-				"label": "Extra Hours Approver",
-				"fieldtype": "Link",
-				"options": "User",
-				"insert_after": "department",
-				"description": "Gets notified when an Additional Hours Request is raised on any Task under this Project.",
+				"fieldname": "custom_allocate_hours",
+				"label": "Allocate Hours",
+				"fieldtype": "Check",
+				"insert_after": "hide_timesheets",
+				"description": "Can set Expected Hours on Task Split rows for this Project.",
+			},
+			{
+				"fieldname": "custom_assign_users",
+				"label": "Assign Users",
+				"fieldtype": "Check",
+				"insert_after": "custom_allocate_hours",
+				"description": "Can assign users on Task Split rows for this Project.",
+			},
+			{
+				"fieldname": "custom_approve_extra_hours",
+				"label": "Approve Extra Hours",
+				"fieldtype": "Check",
+				"insert_after": "custom_assign_users",
+				"description": "Gets notified of, and can approve/reject, Additional Hours Requests under this Project.",
 			},
 		],
 		"Task": [
@@ -27,6 +40,15 @@ def get_custom_fields():
 				"default": "0",
 				"read_only": 1,
 				"no_copy": 1,
+			},
+			{
+				"fieldname": "custom_issue_type",
+				"label": "Issue Type",
+				"fieldtype": "Link",
+				"options": "Issue Type",
+				"insert_after": "issue",
+				"fetch_from": "issue.issue_type",
+				"read_only": 1,
 			},
 			{
 				"fieldname": "custom_split_work_section",

@@ -18,6 +18,27 @@ const CHILD_WORK_ITEM_TYPE = {
 	"Sub-task": null,
 };
 
+// Mirrors EMPLOYEE_STORY_LOCKED_EXCEPTIONS in custom/task.py - this only
+// makes the UI match what the server actually enforces
+// (validate_employee_story_field_restriction); it isn't the real boundary.
+const EMPLOYEE_STORY_EDITABLE_FIELDS = new Set(["custom_task_template"]);
+
+function lock_story_to_template_only(frm) {
+	if (frm.is_new() || frm.doc.custom_work_item_type !== "Story") {
+		return;
+	}
+	if (WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role))) {
+		return;
+	}
+
+	frm.meta.fields.forEach((df) => {
+		if (!EMPLOYEE_STORY_EDITABLE_FIELDS.has(df.fieldname)) {
+			frm.set_df_property(df.fieldname, "read_only", 1);
+		}
+	});
+	frm.refresh_fields();
+}
+
 frappe.ui.form.on("Task", {
 	onload: function (frm) {
 		// Only narrow the dropdown on a NEW doc - narrowing it on an
@@ -61,6 +82,8 @@ frappe.ui.form.on("Task", {
 	},
 
 	refresh: function (frm) {
+		lock_story_to_template_only(frm);
+
 		// Only on an already-saved item - a not-yet-created Epic has no
 		// name yet to link a new child's parent_task to.
 		if (frm.is_new()) {
@@ -122,5 +145,73 @@ frappe.ui.form.on("Task", {
 				frm.refresh_field("custom_task_split");
 			},
 		});
+	},
+});
+
+// Task Split is a child table (istable=1) - it never renders as its own
+// Desk form, so a .js file under its own doctype folder never loads. Child
+// grid field events have to be registered from a script that DOES load, i.e.
+// the parent's - this file already loads on every Task/Story form via the
+// doctype_js hook, so registering the child doctype's events here works.
+frappe.ui.form.on("Task Split", {
+	assign_action: function (frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+
+		const dialog = new frappe.ui.Dialog({
+			title: __("Assign"),
+			fields: [
+				{
+					fieldname: "users",
+					fieldtype: "MultiSelectPills",
+					label: __("Users"),
+					get_data: function (txt) {
+						return frappe.db.get_link_options("User", txt);
+					},
+				},
+			],
+			primary_action_label: __("Update"),
+			primary_action: function (values) {
+				if (row.generated_task) {
+					frappe.call({
+						method: "sigzenjira.custom.task.set_split_row_assignees",
+						args: { row_name: row.name, users: values.users },
+						callback: function () {
+							dialog.hide();
+							frm.reload_doc();
+						},
+					});
+				} else {
+					// No Task yet - stage the picks on the row itself.
+					// generate_tasks_from_split (custom/task.py) applies them as
+					// real assignment the moment the Story save creates the Task.
+					// The visible Assign column is otherwise only ever written by
+					// the real-assignment sync (custom/todo.py), which has nothing
+					// to sync yet - fill it in here too, purely so the pick shows
+					// up immediately instead of looking like it did nothing.
+					const users = values.users || [];
+					frappe.model.set_value(cdt, cdn, "pending_assign_users", JSON.stringify(users));
+					frappe.model.set_value(
+						cdt,
+						cdn,
+						"assign",
+						users.map((user) => frappe.user_info(user).fullname || user).join(", ")
+					);
+					dialog.hide();
+					frm.dirty();
+				}
+			},
+		});
+
+		if (row.generated_task) {
+			frappe.db.get_value("Task", row.generated_task, "_assign").then((r) => {
+				const current = r.message._assign ? JSON.parse(r.message._assign) : [];
+				dialog.set_value("users", current);
+				dialog.show();
+			});
+		} else {
+			const pending = row.pending_assign_users ? JSON.parse(row.pending_assign_users) : [];
+			dialog.set_value("users", pending);
+			dialog.show();
+		}
 	},
 });
