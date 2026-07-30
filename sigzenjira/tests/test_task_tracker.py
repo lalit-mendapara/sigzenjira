@@ -152,6 +152,24 @@ class TestTaskTracker(IntegrationTestCase):
 		employee_names = {e["name"] for e in data["employees"]}
 		self.assertEqual(employee_names, {employee})
 
+	def test_employees_unaffected_by_employee_filter(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project_a = ensure_project("TT Roster Project A - employee filter test")
+
+		make_task("TT Employee Filter A", project=project_a, assignee=employee)
+		make_task("TT Employee Filter B", project=project_a, assignee=other)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project_a, employee=employee)
+		finally:
+			frappe.set_user("Administrator")
+
+		employee_names = {e["name"] for e in data["employees"]}
+		self.assertEqual(employee_names, {employee, other})
+
 	def test_employee_role_only_sees_self_in_project_employees(self):
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
 		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])

@@ -39,8 +39,6 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 		wrapper.tracker_state.employee = $(this).val() || null;
 		fetch_and_render(wrapper);
 	});
-
-	fetch_and_render(wrapper);
 };
 
 frappe.pages["task-tracker"].refresh = (wrapper) => {
@@ -102,8 +100,8 @@ function render_employee_select(wrapper, employees) {
 }
 
 function task_card_html(task, full_names) {
-	const assignee = task.assigned_to
-		? frappe.utils.escape_html(full_names[task.assigned_to] || task.assigned_to)
+	const assignee = task.assignees.length
+		? task.assignees.map((a) => frappe.utils.escape_html(full_names[a] || a)).join(", ")
 		: __("Unassigned");
 	const overdue_flag =
 		task.status === "Overdue"
@@ -134,9 +132,21 @@ function render_board(wrapper, tasks, employees) {
 	const full_names = {};
 	(employees || []).forEach((e) => (full_names[e.name] = e.full_name));
 
+	// One row per assignee comes in from the server; collapse back to one card
+	// per task, listing all its assignees together.
+	const deduped_tasks = {};
+	tasks.forEach((t) => {
+		if (!deduped_tasks[t.name]) {
+			deduped_tasks[t.name] = { ...t, assignees: [] };
+		}
+		if (t.assigned_to) {
+			deduped_tasks[t.name].assignees.push(t.assigned_to);
+		}
+	});
+
 	const columns = {};
 	BOARD_COLUMNS.forEach((c) => (columns[c] = []));
-	tasks.forEach((t) => {
+	Object.values(deduped_tasks).forEach((t) => {
 		const column = STATUS_COLUMN[t.status] || "To Do";
 		columns[column].push(t);
 	});
