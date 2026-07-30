@@ -1,0 +1,117 @@
+import frappe
+from frappe.desk.form import assign_to
+from frappe.tests import IntegrationTestCase
+
+from sigzenjira.sigzenjira.task_tracker import get_tracker_data
+
+MANAGER_USER = "test_tracker_manager@example.com"
+EMPLOYEE_USER = "test_tracker_employee@example.com"
+OTHER_EMPLOYEE_USER = "test_tracker_other_employee@example.com"
+
+
+def ensure_user(email, first_name, roles):
+	if not frappe.db.exists("User", email):
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": first_name,
+				"send_welcome_email": 0,
+				"roles": [{"role": r} for r in roles],
+			}
+		).insert(ignore_permissions=True)
+	return email
+
+
+def make_task(subject, project=None, assignee=None, work_item_type="Task"):
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"subject": subject,
+			"custom_work_item_type": work_item_type,
+			"project": project,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	if assignee:
+		assign_to.add({"assign_to": [assignee], "doctype": "Task", "name": doc.name})
+	return doc
+
+
+def ensure_project(project_name):
+	existing = frappe.db.get_value("Project", {"project_name": project_name})
+	if existing:
+		return existing
+	return frappe.get_doc({"doctype": "Project", "project_name": project_name}).insert(ignore_permissions=True).name
+
+
+class TestTaskTracker(IntegrationTestCase):
+	def test_manager_sees_all_employees_tasks(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+
+		make_task("TT Manager Visible 1", assignee=employee)
+		make_task("TT Manager Visible 2", assignee=other)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data()
+		finally:
+			frappe.set_user("Administrator")
+
+		assigned_users = {t["assigned_to"] for t in data["tasks"]}
+		self.assertIn(employee, assigned_users)
+		self.assertIn(other, assigned_users)
+
+	def test_employee_cannot_see_others_tasks_even_when_requested(self):
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+
+		make_task("TT Own Task", assignee=employee)
+		make_task("TT Other Task", assignee=other)
+
+		frappe.set_user(employee)
+		try:
+			data = get_tracker_data(employee=other)
+		finally:
+			frappe.set_user("Administrator")
+
+		assigned_users = {t["assigned_to"] for t in data["tasks"]}
+		self.assertEqual(assigned_users, {employee})
+
+	def test_project_and_employee_filters_combine(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		project = ensure_project("TT Project A")
+
+		make_task("TT In Project", project=project, assignee=employee)
+		make_task("TT Outside Project", assignee=employee)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project, employee=employee)
+		finally:
+			frappe.set_user("Administrator")
+
+		subjects = {t["subject"] for t in data["tasks"]}
+		self.assertEqual(subjects, {"TT In Project"})
+
+	def test_sidebar_totals_are_unfiltered_by_current_selection(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		project_a = ensure_project("TT Project A")
+		project_b = ensure_project("TT Project B")
+
+		make_task("TT Sidebar A", project=project_a, assignee=employee)
+		make_task("TT Sidebar B", project=project_b, assignee=employee)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project_a)
+		finally:
+			frappe.set_user("Administrator")
+
+		project_names = {p["name"] for p in data["projects"]}
+		self.assertIn(project_a, project_names)
+		self.assertIn(project_b, project_names)
