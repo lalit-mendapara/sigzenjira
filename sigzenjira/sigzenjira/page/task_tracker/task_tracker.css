@@ -1,7 +1,7 @@
 /* apps/sigzenjira/sigzenjira/sigzenjira/page/task_tracker/task_tracker.css */
 .task-tracker-topbar {
 	display: flex;
-	align-items: center;
+	align-items: flex-end;
 	gap: 16px;
 	flex-wrap: wrap;
 	padding-bottom: 12px;
@@ -9,6 +9,19 @@
 	padding-left: 16px;
 	margin-bottom: 16px;
 	border-bottom: 1px solid var(--border-color);
+}
+
+.task-tracker-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.task-tracker-field label {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-muted);
+	margin-bottom: 0;
 }
 
 .task-tracker-project-select,

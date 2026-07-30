@@ -33,17 +33,19 @@ def _scope_to_employee(rows, is_manager):
 	if is_manager:
 		return rows
 	employee = frappe.session.user
-	scoped = []
-	for row in rows:
-		if row["custom_work_item_type"] != "Task":
-			# Epic/Story headers are structural context, not personal work items -
-			# a Task assigned to this employee still needs its real parent's
-			# subject/status, even when the Epic/Story itself isn't assigned to them.
-			scoped.append(row)
-			continue
-		if employee in _assignees(row):
-			scoped.append(row)
-	return scoped
+
+	own_tasks = [r for r in rows if r["custom_work_item_type"] == "Task" and employee in _assignees(r)]
+	# Epic/Story headers are structural context, not personal work items - a Task
+	# assigned to this employee still needs its real parent's subject/status. But
+	# that's ONLY true for the ancestors of the employee's OWN visible Tasks - keeping
+	# every Epic/Story row regardless would leak every work-item subject/status in the
+	# project to a caller with no assignment there at all (get_tracker_data's `project`
+	# is caller-supplied). So prune to exactly the Story/Epic chain above own_tasks.
+	story_names = {t["parent_task"] for t in own_tasks if t["parent_task"]}
+	kept_stories = [r for r in rows if r["custom_work_item_type"] == "Story" and r["name"] in story_names]
+	epic_names = {s["parent_task"] for s in kept_stories if s["parent_task"]}
+	kept_epics = [r for r in rows if r["custom_work_item_type"] == "Epic" and r["name"] in epic_names]
+	return own_tasks + kept_stories + kept_epics
 
 
 def _task_summary(row):
@@ -61,13 +63,24 @@ def _build_epics(rows):
 	stories = [r for r in rows if r["custom_work_item_type"] == "Story"]
 	leaf_tasks = [r for r in rows if r["custom_work_item_type"] == "Task"]
 
+	# Keys are coerced to the synthetic None bucket whenever the parent isn't
+	# actually present in `rows` - out-of-project/out-of-scope parent, a dangling
+	# parent_task, or (legacy data) a Task parented straight at an Epic. Without
+	# this, a Story/Task whose parent row didn't survive the caller's project
+	# filter is unreachable: it sits in stories_by_epic/tasks_by_story under a key
+	# that no epic_dict/story_dict call ever looks up, and silently vanishes.
+	epic_keys = {e["name"] for e in epics}
+	story_keys = {s["name"] for s in stories}
+
 	stories_by_epic = {}
 	for story in stories:
-		stories_by_epic.setdefault(story["parent_task"], []).append(story)
+		key = story["parent_task"] if story["parent_task"] in epic_keys else None
+		stories_by_epic.setdefault(key, []).append(story)
 
 	tasks_by_story = {}
 	for task in leaf_tasks:
-		tasks_by_story.setdefault(task["parent_task"], []).append(task)
+		key = task["parent_task"] if task["parent_task"] in story_keys else None
+		tasks_by_story.setdefault(key, []).append(task)
 
 	def story_dict(story_row, story_key):
 		story_tasks = sorted(tasks_by_story.get(story_key, []), key=lambda t: t["subject"])
@@ -83,15 +96,16 @@ def _build_epics(rows):
 		child_stories = sorted(stories_by_epic.get(epic_key, []), key=lambda s: s["subject"])
 		story_list = [story_dict(s, s["name"]) for s in child_stories]
 		if epic_key is None and tasks_by_story.get(None):
-			# Story-less Tasks can never be Epic-linked directly (validate_hierarchy
-			# requires a Task's parent to be a Story or nothing) - they only ever
-			# land in the synthetic "No Epic" bucket's own "No Story" row.
+			# The synthetic "No Epic" bucket's own "No Story" row is the catch-all
+			# for: Story-less Tasks (validate_hierarchy forbids a Task parented
+			# directly to an Epic), Tasks whose Story parent didn't survive the
+			# project/permission scope, and Tasks with a dangling parent_task -
+			# not just the never-directly-under-an-Epic case.
 			story_list.append(story_dict(None, None))
 		return {
 			"name": epic_key,
 			"subject": epic_row["subject"] if epic_row else "No Epic",
 			"status": epic_row["status"] if epic_row else None,
-			"story_total": len(story_list),
 			"stories": story_list,
 		}
 
@@ -101,6 +115,42 @@ def _build_epics(rows):
 	return result
 
 
+def _project_counts(is_manager):
+	# Deliberately unscoped by *selected* project - this badge is the Project
+	# dropdown's own count, same site-wide-for-managers convention as the rest of
+	# this module. See test_sidebar_totals_are_unfiltered_by_current_selection.
+	if is_manager:
+		counts = frappe.get_all(
+			"Task",
+			filters={"custom_work_item_type": "Task", "project": ["is", "set"]},
+			fields=["project", {"COUNT": "name", "as": "task_count"}],
+			group_by="project",
+		)
+		return {c["project"]: c["task_count"] for c in counts}
+
+	# Non-manager: can't group-count in SQL and stay exact, because "assigned to
+	# me" lives in the _assign JSON list, not a column. The `like` filter is only
+	# a prefilter to keep the row-set small (avoids a site-wide 8-field fetch) -
+	# `like` can false-positive on substring emails (e.g. "a@x.com" inside
+	# "da@x.com"), so the authoritative check is still the exact Python
+	# membership test below before anything gets counted.
+	user = frappe.session.user
+	rows = frappe.get_all(
+		"Task",
+		filters={
+			"custom_work_item_type": "Task",
+			"project": ["is", "set"],
+			"_assign": ["like", f"%{user}%"],
+		},
+		fields=["project", "_assign"],
+	)
+	counts = {}
+	for row in rows:
+		if user in _assignees(row):
+			counts[row["project"]] = counts.get(row["project"], 0) + 1
+	return counts
+
+
 @frappe.whitelist()
 def get_tracker_data(project: str | None = None):
 	if not set(frappe.get_roles(frappe.session.user)) & {"Projects User", MANAGER_ROLE}:
@@ -108,18 +158,7 @@ def get_tracker_data(project: str | None = None):
 
 	is_manager = _is_manager()
 
-	# Deliberately unscoped: this page's whole point is that Projects Manager sees
-	# every task site-wide, regardless of any Project/Company User Permission that
-	# would otherwise scope Task for them. See test_manager_sees_every_employees_tasks_in_tree.
-	all_rows = frappe.get_all(
-		"Task", filters={"custom_work_item_type": ["in", LEAF_WORK_ITEM_TYPES]}, fields=TASK_FIELDS
-	)
-	all_rows = _scope_to_employee(all_rows, is_manager)
-
-	project_counts = {}
-	for row in all_rows:
-		if row["project"] and row["custom_work_item_type"] == "Task":
-			project_counts[row["project"]] = project_counts.get(row["project"], 0) + 1
+	project_counts = _project_counts(is_manager)
 
 	project_names = {}
 	if project_counts:
@@ -134,16 +173,26 @@ def get_tracker_data(project: str | None = None):
 	]
 	projects.sort(key=lambda p: p["project_name"])
 
-	# Scoped to the selected project only, same convention as project_counts being
-	# scoped to the permission-visible set above - the Employee dropdown lists that
-	# project's Task assignees, not every assignee the user can see. Empty when no
+	# Tree rows are fetched for the selected project only - the global fetch this
+	# replaced pulled every Epic/Story/Task site-wide (8 fields incl. _assign) just
+	# to answer the badge counts above, which are now their own query.
+	project_rows = []
+	if project:
+		project_rows = frappe.get_all(
+			"Task",
+			filters={"custom_work_item_type": ["in", LEAF_WORK_ITEM_TYPES], "project": project},
+			fields=TASK_FIELDS,
+		)
+		project_rows = _scope_to_employee(project_rows, is_manager)
+
+	# Employee dropdown lists this project's Task assignees, not every assignee
+	# the user can see - same convention as project_counts above. Empty when no
 	# project is chosen (nothing to scope the list to).
 	employee_counts = {}
-	if project:
-		for row in all_rows:
-			if row["project"] == project and row["custom_work_item_type"] == "Task":
-				for user in _assignees(row):
-					employee_counts[user] = employee_counts.get(user, 0) + 1
+	for row in project_rows:
+		if row["custom_work_item_type"] == "Task":
+			for user in _assignees(row):
+				employee_counts[user] = employee_counts.get(user, 0) + 1
 
 	full_names = {}
 	if employee_counts:
@@ -158,6 +207,6 @@ def get_tracker_data(project: str | None = None):
 	]
 	employees.sort(key=lambda e: e["full_name"])
 
-	epics = _build_epics([r for r in all_rows if r["project"] == project]) if project else []
+	epics = _build_epics(project_rows) if project else []
 
 	return {"projects": projects, "employees": employees, "epics": epics}

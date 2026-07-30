@@ -28,16 +28,31 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 	wrapper.tracker_state = {
 		project: null,
 		employee: null,
-		ecd: frappe.datetime.get_today(),
+		ecd: null,
 	};
 	wrapper.$projects = null;
 	wrapper.$data = { projects: [], employees: [], epics: [] };
 
 	wrapper.$layout = $(`<div class="task-tracker-layout">
 		<div class="task-tracker-topbar">
-			<select class="task-tracker-project-select form-control"></select>
-			<select class="task-tracker-employee-select form-control" disabled></select>
-			<input type="date" class="task-tracker-ecd-input form-control" value="${wrapper.tracker_state.ecd}">
+			<div class="task-tracker-field">
+				<label for="task-tracker-project-select">${__("Project")}</label>
+				<select id="task-tracker-project-select" class="task-tracker-project-select form-control" aria-label="${__(
+					"Project"
+				)}"></select>
+			</div>
+			<div class="task-tracker-field">
+				<label for="task-tracker-employee-select">${__("Employee")}</label>
+				<select id="task-tracker-employee-select" class="task-tracker-employee-select form-control" aria-label="${__(
+					"Employee"
+				)}" disabled></select>
+			</div>
+			<div class="task-tracker-field">
+				<label for="task-tracker-ecd-input">${__("Due on or before")}</label>
+				<input type="date" id="task-tracker-ecd-input" class="task-tracker-ecd-input form-control" aria-label="${__(
+					"Due on or before"
+				)}" value="${wrapper.tracker_state.ecd || ""}">
+			</div>
 		</div>
 		<div class="task-tracker-board"></div>
 	</div>`).appendTo(page.main);
@@ -105,6 +120,15 @@ function render_project_select(wrapper) {
 
 function render_employee_select(wrapper, employees) {
 	const $select = wrapper.$layout.find(".task-tracker-employee-select");
+	if (
+		wrapper.tracker_state.employee &&
+		!(employees || []).some((e) => e.name === wrapper.tracker_state.employee)
+	) {
+		// The previously selected employee has no Tasks left in this project (e.g.
+		// their last Task was reassigned) - fall back to "All employees" instead of
+		// silently filtering the tree to someone no longer in the list.
+		wrapper.tracker_state.employee = null;
+	}
 	const current = wrapper.tracker_state.employee || "";
 	$select.prop("disabled", !wrapper.tracker_state.project);
 	const options = [`<option value="">${__("All employees")}</option>`]

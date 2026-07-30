@@ -54,11 +54,15 @@ def ensure_project(project_name):
 
 
 def _find_epic(epics, name):
-	return next(e for e in epics if e["name"] == name)
+	found = next((e for e in epics if e["name"] == name), None)
+	assert found is not None, f"epic {name!r} not found in {[e['name'] for e in epics]}"
+	return found
 
 
 def _find_story(stories, name):
-	return next(s for s in stories if s["name"] == name)
+	found = next((s for s in stories if s["name"] == name), None)
+	assert found is not None, f"story {name!r} not found in {[s['name'] for s in stories]}"
+	return found
 
 
 class TestTaskTracker(IntegrationTestCase):
@@ -84,7 +88,7 @@ class TestTaskTracker(IntegrationTestCase):
 
 		found_epic = _find_epic(data["epics"], epic.name)
 		self.assertEqual(found_epic["subject"], "TT Epic")
-		self.assertEqual(found_epic["story_total"], 1)
+		self.assertNotIn("story_total", found_epic)
 
 		found_story = _find_story(found_epic["stories"], story.name)
 		self.assertEqual(found_story["subject"], "TT Story")
@@ -127,7 +131,8 @@ class TestTaskTracker(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-		no_epic = next(e for e in data["epics"] if e["name"] is None)
+		no_epic = next((e for e in data["epics"] if e["name"] is None), None)
+		assert no_epic is not None, "synthetic 'No Epic' bucket missing"
 		self.assertEqual(no_epic["subject"], "No Epic")
 		found_story = _find_story(no_epic["stories"], orphan_story.name)
 		self.assertEqual(found_story["subject"], "TT Orphan Story")
@@ -145,8 +150,10 @@ class TestTaskTracker(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-		no_epic = next(e for e in data["epics"] if e["name"] is None)
-		no_story = next(s for s in no_epic["stories"] if s["name"] is None)
+		no_epic = next((e for e in data["epics"] if e["name"] is None), None)
+		assert no_epic is not None, "synthetic 'No Epic' bucket missing"
+		no_story = next((s for s in no_epic["stories"] if s["name"] is None), None)
+		assert no_story is not None, "synthetic 'No Story' row missing"
 		self.assertEqual(no_story["subject"], "No Story")
 		task_subjects = {t["subject"] for t in no_story["tasks"]}
 		self.assertIn("TT Orphan Task", task_subjects)
@@ -222,6 +229,34 @@ class TestTaskTracker(IntegrationTestCase):
 		task_subjects = {t["subject"] for t in found_story["tasks"]}
 		self.assertEqual(task_subjects, {"TT Employee Own Task"})
 
+	def test_non_manager_gets_empty_epics_for_project_with_no_own_tasks(self):
+		# get_tracker_data is whitelisted with a caller-supplied `project` - a plain
+		# Projects User must not be able to read Epic/Story subjects/status for a
+		# project they have no assigned Task in, just by naming it.
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project = ensure_project("TT Disclosure Project")
+
+		epic = make_task("TT Disclosure Epic", project=project, work_item_type="Epic")
+		story = make_task(
+			"TT Disclosure Story", project=project, work_item_type="Story", parent_task=epic.name
+		)
+		make_task(
+			"TT Disclosure Other Task",
+			project=project,
+			work_item_type="Task",
+			parent_task=story.name,
+			assignee=other,
+		)
+
+		frappe.set_user(employee)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertEqual(data["epics"], [])
+
 	def test_tasks_outside_project_are_excluded(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
 		project_a = ensure_project("TT Cross Project A")
@@ -249,6 +284,30 @@ class TestTaskTracker(IntegrationTestCase):
 		self.assertIn(epic_a.name, epic_names)
 		self.assertNotIn(epic_b.name, epic_names)
 
+	def test_epic_outside_project_still_surfaces_its_story_under_no_epic(self):
+		# Epic has no project (or a different one) but its Story is in the queried
+		# project - the Story (and its Task) must not vanish just because their
+		# Epic ancestor didn't survive the project filter.
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		project = ensure_project("TT Coercion Project")
+
+		foreign_epic = make_task("TT Foreign Epic", project=None, work_item_type="Epic")
+		story = make_task(
+			"TT Coerced Story", project=project, work_item_type="Story", parent_task=foreign_epic.name
+		)
+		make_task("TT Coerced Task", project=project, work_item_type="Task", parent_task=story.name)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		no_epic = next((e for e in data["epics"] if e["name"] is None), None)
+		assert no_epic is not None, "synthetic 'No Epic' bucket missing - the coerced Story vanished"
+		found_story = _find_story(no_epic["stories"], story.name)
+		self.assertEqual(found_story["task_total"], 1)
+
 	def test_project_and_employee_counts_are_task_type_only(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
@@ -266,10 +325,12 @@ class TestTaskTracker(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-		found_project = next(p for p in data["projects"] if p["name"] == project)
+		found_project = next((p for p in data["projects"] if p["name"] == project), None)
+		assert found_project is not None, f"project {project!r} not found in {data['projects']}"
 		self.assertEqual(found_project["task_count"], 1)
 
-		found_employee = next(e for e in data["employees"] if e["name"] == employee)
+		found_employee = next((e for e in data["employees"] if e["name"] == employee), None)
+		assert found_employee is not None, f"employee {employee!r} not found in {data['employees']}"
 		self.assertEqual(found_employee["task_count"], 1)
 
 	def test_employees_empty_when_no_project(self):
