@@ -6,6 +6,7 @@ const STATUS_COLUMN = {
 	Completed: "Done",
 	Cancelled: "Done",
 	Overdue: "To Do",
+	Blocked: "In Progress",
 };
 
 const BOARD_COLUMNS = ["To Do", "In Progress", "In Review", "Done"];
@@ -108,8 +109,13 @@ function task_card_html(task, full_names) {
 		task.status === "Overdue"
 			? `<span class="indicator-pill red" style="margin-bottom:4px;">${__("Overdue")}</span>`
 			: "";
+	const blocked_flag =
+		task.status === "Blocked"
+			? `<span class="indicator-pill orange" style="margin-bottom:4px;">${__("Blocked")}</span>`
+			: "";
 	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}" style="cursor:pointer; border:1px solid var(--border-color); border-radius:6px; padding:8px; margin-bottom:8px;">
 		${overdue_flag}
+		${blocked_flag}
 		<div>${frappe.utils.escape_html(task.subject)}</div>
 		<div class="text-muted small">${frappe.utils.escape_html(task.work_item_type || "")}</div>
 		<div class="text-muted small">${assignee}</div>
