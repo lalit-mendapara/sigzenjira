@@ -26,13 +26,14 @@ def ensure_user(email, first_name, roles):
 	return email
 
 
-def make_task(subject, project=None, assignee=None, work_item_type="Task"):
+def make_task(subject, project=None, assignee=None, work_item_type="Task", parent_task=None):
 	doc = frappe.get_doc(
 		{
 			"doctype": "Task",
 			"subject": subject,
 			"custom_work_item_type": work_item_type,
 			"project": project,
+			"parent_task": parent_task,
 		}
 	)
 	doc.insert(ignore_permissions=True)
@@ -48,66 +49,177 @@ def ensure_project(project_name):
 	return frappe.get_doc({"doctype": "Project", "project_name": project_name}).insert(ignore_permissions=True).name
 
 
+def _find_epic(epics, name):
+	return next(e for e in epics if e["name"] == name)
+
+
+def _find_story(stories, name):
+	return next(s for s in stories if s["name"] == name)
+
+
 class TestTaskTracker(IntegrationTestCase):
-	def test_manager_sees_all_employees_tasks(self):
+	def test_epic_story_task_nest_with_correct_totals(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
-		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project = ensure_project("TT Hierarchy Project")
 
-		make_task("TT Manager Visible 1", assignee=employee)
-		make_task("TT Manager Visible 2", assignee=other)
+		epic = make_task("TT Epic", project=project, work_item_type="Epic")
+		story = make_task("TT Story", project=project, work_item_type="Story", parent_task=epic.name)
+		make_task(
+			"TT Task 1", project=project, work_item_type="Task", parent_task=story.name, assignee=employee
+		)
+		make_task(
+			"TT Task 2", project=project, work_item_type="Task", parent_task=story.name, assignee=employee
+		)
 
 		frappe.set_user(manager)
 		try:
-			data = get_tracker_data()
+			data = get_tracker_data(project=project)
 		finally:
 			frappe.set_user("Administrator")
 
-		assigned_users = {t["assigned_to"] for t in data["tasks"]}
-		self.assertIn(employee, assigned_users)
-		self.assertIn(other, assigned_users)
+		found_epic = _find_epic(data["epics"], epic.name)
+		self.assertEqual(found_epic["subject"], "TT Epic")
+		self.assertEqual(found_epic["story_total"], 1)
 
-	def test_employee_cannot_see_others_tasks_even_when_requested(self):
+		found_story = _find_story(found_epic["stories"], story.name)
+		self.assertEqual(found_story["subject"], "TT Story")
+		self.assertEqual(found_story["task_total"], 2)
+		task_subjects = {t["subject"] for t in found_story["tasks"]}
+		self.assertEqual(task_subjects, {"TT Task 1", "TT Task 2"})
+
+	def test_sub_task_never_appears_in_payload(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		project = ensure_project("TT Subtask Project")
+
+		epic = make_task("TT Subtask Epic", project=project, work_item_type="Epic")
+		story = make_task("TT Subtask Story", project=project, work_item_type="Story", parent_task=epic.name)
+		task = make_task("TT Subtask Task", project=project, work_item_type="Task", parent_task=story.name)
+		make_task("TT Subtask Child", project=project, work_item_type="Sub-task", parent_task=task.name)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		found_story = _find_story(_find_epic(data["epics"], epic.name)["stories"], story.name)
+		self.assertEqual(found_story["task_total"], 1)
+		task_subjects = {t["subject"] for t in found_story["tasks"]}
+		self.assertNotIn("TT Subtask Child", task_subjects)
+
+	def test_epic_less_story_buckets_under_no_epic(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		project = ensure_project("TT Orphan Story Project")
+
+		orphan_story = make_task("TT Orphan Story", project=project, work_item_type="Story")
+		make_task(
+			"TT Orphan Story Task", project=project, work_item_type="Task", parent_task=orphan_story.name
+		)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		no_epic = next(e for e in data["epics"] if e["name"] is None)
+		self.assertEqual(no_epic["subject"], "No Epic")
+		found_story = _find_story(no_epic["stories"], orphan_story.name)
+		self.assertEqual(found_story["subject"], "TT Orphan Story")
+		self.assertEqual(found_story["task_total"], 1)
+
+	def test_story_less_task_buckets_under_no_epic_no_story(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		project = ensure_project("TT Orphan Task Project")
+
+		make_task("TT Orphan Task", project=project, work_item_type="Task")
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		no_epic = next(e for e in data["epics"] if e["name"] is None)
+		no_story = next(s for s in no_epic["stories"] if s["name"] is None)
+		self.assertEqual(no_story["subject"], "No Story")
+		task_subjects = {t["subject"] for t in no_story["tasks"]}
+		self.assertIn("TT Orphan Task", task_subjects)
+
+	def test_manager_sees_every_employees_tasks_in_tree(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
 		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project = ensure_project("TT Manager Visibility Project")
 
-		make_task("TT Own Task", assignee=employee)
-		make_task("TT Other Task", assignee=other)
+		epic = make_task("TT Visibility Epic", project=project, work_item_type="Epic")
+		story = make_task("TT Visibility Story", project=project, work_item_type="Story", parent_task=epic.name)
+		make_task(
+			"TT Visibility Task 1",
+			project=project,
+			work_item_type="Task",
+			parent_task=story.name,
+			assignee=employee,
+		)
+		make_task(
+			"TT Visibility Task 2", project=project, work_item_type="Task", parent_task=story.name, assignee=other
+		)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		found_story = _find_story(_find_epic(data["epics"], epic.name)["stories"], story.name)
+		all_assignees = {a for t in found_story["tasks"] for a in t["assignees"]}
+		self.assertIn(employee, all_assignees)
+		self.assertIn(other, all_assignees)
+
+	def test_employee_only_sees_own_task_but_real_parent_headers(self):
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project = ensure_project("TT Employee Visibility Project")
+
+		epic = make_task("TT Employee Epic", project=project, work_item_type="Epic")
+		story = make_task("TT Employee Story", project=project, work_item_type="Story", parent_task=epic.name)
+		make_task(
+			"TT Employee Own Task",
+			project=project,
+			work_item_type="Task",
+			parent_task=story.name,
+			assignee=employee,
+		)
+		make_task(
+			"TT Employee Other Task", project=project, work_item_type="Task", parent_task=story.name, assignee=other
+		)
 
 		frappe.set_user(employee)
 		try:
-			data = get_tracker_data(employee=other)
+			data = get_tracker_data(project=project)
 		finally:
 			frappe.set_user("Administrator")
 
-		assigned_users = {t["assigned_to"] for t in data["tasks"]}
-		self.assertEqual(assigned_users, {employee})
+		found_epic = _find_epic(data["epics"], epic.name)
+		self.assertEqual(found_epic["subject"], "TT Employee Epic")
+		found_story = _find_story(found_epic["stories"], story.name)
+		self.assertEqual(found_story["subject"], "TT Employee Story")
+		task_subjects = {t["subject"] for t in found_story["tasks"]}
+		self.assertEqual(task_subjects, {"TT Employee Own Task"})
 
-	def test_project_and_employee_filters_combine(self):
+	def test_tasks_outside_project_are_excluded(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
-		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
-		project = ensure_project("TT Project A")
+		project_a = ensure_project("TT Cross Project A")
+		project_b = ensure_project("TT Cross Project B")
 
-		make_task("TT In Project", project=project, assignee=employee)
-		make_task("TT Outside Project", assignee=employee)
+		epic_a = make_task("TT Cross Epic A", project=project_a, work_item_type="Epic")
+		story_a = make_task("TT Cross Story A", project=project_a, work_item_type="Story", parent_task=epic_a.name)
+		make_task("TT Cross Task A", project=project_a, work_item_type="Task", parent_task=story_a.name)
 
-		frappe.set_user(manager)
-		try:
-			data = get_tracker_data(project=project, employee=employee)
-		finally:
-			frappe.set_user("Administrator")
-
-		subjects = {t["subject"] for t in data["tasks"]}
-		self.assertEqual(subjects, {"TT In Project"})
-
-	def test_sidebar_totals_are_unfiltered_by_current_selection(self):
-		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
-		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
-		project_a = ensure_project("TT Project A")
-		project_b = ensure_project("TT Project B")
-
-		make_task("TT Sidebar A", project=project_a, assignee=employee)
-		make_task("TT Sidebar B", project=project_b, assignee=employee)
+		epic_b = make_task("TT Cross Epic B", project=project_b, work_item_type="Epic")
+		story_b = make_task("TT Cross Story B", project=project_b, work_item_type="Story", parent_task=epic_b.name)
+		make_task("TT Cross Task B", project=project_b, work_item_type="Task", parent_task=story_b.name)
 
 		frappe.set_user(manager)
 		try:
@@ -115,9 +227,32 @@ class TestTaskTracker(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-		project_names = {p["name"] for p in data["projects"]}
-		self.assertIn(project_a, project_names)
-		self.assertIn(project_b, project_names)
+		epic_names = {e["name"] for e in data["epics"]}
+		self.assertIn(epic_a.name, epic_names)
+		self.assertNotIn(epic_b.name, epic_names)
+
+	def test_project_and_employee_counts_are_task_type_only(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		project = ensure_project("TT Count Project")
+
+		epic = make_task("TT Count Epic", project=project, work_item_type="Epic")
+		story = make_task("TT Count Story", project=project, work_item_type="Story", parent_task=epic.name)
+		make_task(
+			"TT Count Task", project=project, work_item_type="Task", parent_task=story.name, assignee=employee
+		)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project)
+		finally:
+			frappe.set_user("Administrator")
+
+		found_project = next(p for p in data["projects"] if p["name"] == project)
+		self.assertEqual(found_project["task_count"], 1)
+
+		found_employee = next(e for e in data["employees"] if e["name"] == employee)
+		self.assertEqual(found_employee["task_count"], 1)
 
 	def test_employees_empty_when_no_project(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
@@ -132,6 +267,7 @@ class TestTaskTracker(IntegrationTestCase):
 			frappe.set_user("Administrator")
 
 		self.assertEqual(data["employees"], [])
+		self.assertEqual(data["epics"], [])
 
 	def test_employees_scoped_to_selected_project(self):
 		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
@@ -152,24 +288,6 @@ class TestTaskTracker(IntegrationTestCase):
 		employee_names = {e["name"] for e in data["employees"]}
 		self.assertEqual(employee_names, {employee})
 
-	def test_employees_unaffected_by_employee_filter(self):
-		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
-		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
-		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
-		project_a = ensure_project("TT Roster Project A - employee filter test")
-
-		make_task("TT Employee Filter A", project=project_a, assignee=employee)
-		make_task("TT Employee Filter B", project=project_a, assignee=other)
-
-		frappe.set_user(manager)
-		try:
-			data = get_tracker_data(project=project_a, employee=employee)
-		finally:
-			frappe.set_user("Administrator")
-
-		employee_names = {e["name"] for e in data["employees"]}
-		self.assertEqual(employee_names, {employee, other})
-
 	def test_employee_role_only_sees_self_in_project_employees(self):
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
 		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
@@ -186,6 +304,25 @@ class TestTaskTracker(IntegrationTestCase):
 
 		employee_names = {e["name"] for e in data["employees"]}
 		self.assertEqual(employee_names, {employee})
+
+	def test_sidebar_totals_are_unfiltered_by_current_selection(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		project_a = ensure_project("TT Project A")
+		project_b = ensure_project("TT Project B")
+
+		make_task("TT Sidebar A", project=project_a, assignee=employee)
+		make_task("TT Sidebar B", project=project_b, assignee=employee)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project_a)
+		finally:
+			frappe.set_user("Administrator")
+
+		project_names = {p["name"] for p in data["projects"]}
+		self.assertIn(project_a, project_names)
+		self.assertIn(project_b, project_names)
 
 
 class TestTaskTrackerWorkspaceShortcut(IntegrationTestCase):
