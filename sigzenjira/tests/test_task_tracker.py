@@ -46,7 +46,11 @@ def ensure_project(project_name):
 	existing = frappe.db.get_value("Project", {"project_name": project_name})
 	if existing:
 		return existing
-	return frappe.get_doc({"doctype": "Project", "project_name": project_name}).insert(ignore_permissions=True).name
+	return (
+		frappe.get_doc({"doctype": "Project", "project_name": project_name})
+		.insert(ignore_permissions=True)
+		.name
+	)
 
 
 def _find_epic(epics, name):
@@ -154,7 +158,9 @@ class TestTaskTracker(IntegrationTestCase):
 		project = ensure_project("TT Manager Visibility Project")
 
 		epic = make_task("TT Visibility Epic", project=project, work_item_type="Epic")
-		story = make_task("TT Visibility Story", project=project, work_item_type="Story", parent_task=epic.name)
+		story = make_task(
+			"TT Visibility Story", project=project, work_item_type="Story", parent_task=epic.name
+		)
 		make_task(
 			"TT Visibility Task 1",
 			project=project,
@@ -163,7 +169,11 @@ class TestTaskTracker(IntegrationTestCase):
 			assignee=employee,
 		)
 		make_task(
-			"TT Visibility Task 2", project=project, work_item_type="Task", parent_task=story.name, assignee=other
+			"TT Visibility Task 2",
+			project=project,
+			work_item_type="Task",
+			parent_task=story.name,
+			assignee=other,
 		)
 
 		frappe.set_user(manager)
@@ -192,7 +202,11 @@ class TestTaskTracker(IntegrationTestCase):
 			assignee=employee,
 		)
 		make_task(
-			"TT Employee Other Task", project=project, work_item_type="Task", parent_task=story.name, assignee=other
+			"TT Employee Other Task",
+			project=project,
+			work_item_type="Task",
+			parent_task=story.name,
+			assignee=other,
 		)
 
 		frappe.set_user(employee)
@@ -214,11 +228,15 @@ class TestTaskTracker(IntegrationTestCase):
 		project_b = ensure_project("TT Cross Project B")
 
 		epic_a = make_task("TT Cross Epic A", project=project_a, work_item_type="Epic")
-		story_a = make_task("TT Cross Story A", project=project_a, work_item_type="Story", parent_task=epic_a.name)
+		story_a = make_task(
+			"TT Cross Story A", project=project_a, work_item_type="Story", parent_task=epic_a.name
+		)
 		make_task("TT Cross Task A", project=project_a, work_item_type="Task", parent_task=story_a.name)
 
 		epic_b = make_task("TT Cross Epic B", project=project_b, work_item_type="Epic")
-		story_b = make_task("TT Cross Story B", project=project_b, work_item_type="Story", parent_task=epic_b.name)
+		story_b = make_task(
+			"TT Cross Story B", project=project_b, work_item_type="Story", parent_task=epic_b.name
+		)
 		make_task("TT Cross Task B", project=project_b, work_item_type="Task", parent_task=story_b.name)
 
 		frappe.set_user(manager)
@@ -345,6 +363,8 @@ class TestTaskTrackerWorkspaceShortcut(IntegrationTestCase):
 
 		content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
 		shortcut_blocks = [
-			b for b in content if b.get("type") == "shortcut" and b.get("data", {}).get("shortcut_name") == "Task Tracker"
+			b
+			for b in content
+			if b.get("type") == "shortcut" and b.get("data", {}).get("shortcut_name") == "Task Tracker"
 		]
 		self.assertEqual(len(shortcut_blocks), 1)

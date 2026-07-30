@@ -94,7 +94,9 @@ function render_project_select(wrapper) {
 		.concat(
 			(wrapper.$projects || []).map(
 				(p) =>
-					`<option value="${frappe.utils.escape_html(p.name)}" ${p.name === current ? "selected" : ""}>${frappe.utils.escape_html(p.project_name)} (${p.task_count})</option>`
+					`<option value="${frappe.utils.escape_html(p.name)}" ${
+						p.name === current ? "selected" : ""
+					}>${frappe.utils.escape_html(p.project_name)} (${p.task_count})</option>`
 			)
 		)
 		.join("");
@@ -109,7 +111,9 @@ function render_employee_select(wrapper, employees) {
 		.concat(
 			(employees || []).map(
 				(e) =>
-					`<option value="${frappe.utils.escape_html(e.name)}" ${e.name === current ? "selected" : ""}>${frappe.utils.escape_html(e.full_name)} (${e.task_count})</option>`
+					`<option value="${frappe.utils.escape_html(e.name)}" ${
+						e.name === current ? "selected" : ""
+					}>${frappe.utils.escape_html(e.full_name)} (${e.task_count})</option>`
 			)
 		)
 		.join("");
@@ -136,16 +140,26 @@ function task_card_html(task, full_names) {
 		? task.assignees
 				.map((a) => {
 					const name = full_names[a] || a;
-					return `<span class="task-tracker-avatar" title="${frappe.utils.escape_html(name)}">${frappe.utils.escape_html(get_initials(name))}</span>`;
+					return `<span class="task-tracker-avatar" title="${frappe.utils.escape_html(
+						name
+					)}">${frappe.utils.escape_html(get_initials(name))}</span>`;
 				})
 				.join("")
-		: `<span class="task-tracker-avatar task-tracker-avatar-empty" title="${__("Unassigned")}">?</span>`;
+		: `<span class="task-tracker-avatar task-tracker-avatar-empty" title="${__(
+				"Unassigned"
+		  )}">?</span>`;
 	const overdue_flag =
-		task.status === "Overdue" ? `<span class="indicator-pill red">${__("Overdue")}</span>` : "";
+		task.status === "Overdue"
+			? `<span class="indicator-pill red">${__("Overdue")}</span>`
+			: "";
 	const blocked_flag =
-		task.status === "Blocked" ? `<span class="indicator-pill orange">${__("Blocked")}</span>` : "";
+		task.status === "Blocked"
+			? `<span class="indicator-pill orange">${__("Blocked")}</span>`
+			: "";
 	const cancelled_flag =
-		task.status === "Cancelled" ? `<span class="indicator-pill darkgrey">${__("Cancelled")}</span>` : "";
+		task.status === "Cancelled"
+			? `<span class="indicator-pill darkgrey">${__("Cancelled")}</span>`
+			: "";
 	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}">
 		<div class="task-tracker-card-flags">${overdue_flag}${blocked_flag}${cancelled_flag}</div>
 		<div class="task-tracker-card-title">${frappe.utils.escape_html(task.subject)}</div>
@@ -183,14 +197,18 @@ function render_swimlanes(wrapper) {
 
 	if (!wrapper.tracker_state.project) {
 		$container.append(
-			`<div class="task-tracker-empty-state">${__("Select a project to view its board")}</div>`
+			`<div class="task-tracker-empty-state">${__(
+				"Select a project to view its board"
+			)}</div>`
 		);
 		return;
 	}
 
 	const epics = (wrapper.$data && wrapper.$data.epics) || [];
 	const full_names = {};
-	((wrapper.$data && wrapper.$data.employees) || []).forEach((e) => (full_names[e.name] = e.full_name));
+	((wrapper.$data && wrapper.$data.employees) || []).forEach(
+		(e) => (full_names[e.name] = e.full_name)
+	);
 
 	const { employee, ecd } = wrapper.tracker_state;
 	const task_matches = (t) => {
@@ -208,7 +226,9 @@ function render_swimlanes(wrapper) {
 		if (!visible_stories.length) return;
 
 		rendered_any = true;
-		const epic_name_attr = epic.name ? ` data-name="${frappe.utils.escape_html(epic.name)}"` : "";
+		const epic_name_attr = epic.name
+			? ` data-name="${frappe.utils.escape_html(epic.name)}"`
+			: "";
 		const $epic = $(`<div class="task-tracker-epic">
 			<div class="task-tracker-epic-header"${epic_name_attr}>
 				<span class="task-tracker-epic-title">${frappe.utils.escape_html(epic.subject)}</span>
@@ -218,7 +238,9 @@ function render_swimlanes(wrapper) {
 
 		visible_stories.forEach((story) => {
 			const matching_tasks = story.tasks.filter(task_matches);
-			const story_name_attr = story.name ? ` data-name="${frappe.utils.escape_html(story.name)}"` : "";
+			const story_name_attr = story.name
+				? ` data-name="${frappe.utils.escape_html(story.name)}"`
+				: "";
 			const $story = $(`<div class="task-tracker-story">
 				<div class="task-tracker-story-header"${story_name_attr}>
 					<span class="task-tracker-story-title">${frappe.utils.escape_html(story.subject)}</span>
@@ -230,7 +252,9 @@ function render_swimlanes(wrapper) {
 				// Story has real Task descendants (task_total > 0 above) but none
 				// survive the current Employee/ECD filter - stays visible so the
 				// user knows this is a filter artifact, not a structural fact.
-				$story.append(`<div class="task-tracker-no-match">${__("No matching tasks")}</div>`);
+				$story.append(
+					`<div class="task-tracker-no-match">${__("No matching tasks")}</div>`
+				);
 			} else {
 				$story.append(render_columns(matching_tasks, full_names));
 			}
@@ -241,16 +265,17 @@ function render_swimlanes(wrapper) {
 	});
 
 	if (!rendered_any) {
-		$container.append(`<div class="task-tracker-empty-state">${__("No tasks in this project yet")}</div>`);
+		$container.append(
+			`<div class="task-tracker-empty-state">${__("No tasks in this project yet")}</div>`
+		);
 	}
 
 	$container.find(".task-tracker-card").on("click", function () {
 		frappe.set_route("Form", "Task", $(this).attr("data-task"));
 	});
-	$container.find(".task-tracker-epic-header[data-name], .task-tracker-story-header[data-name]").on(
-		"click",
-		function () {
+	$container
+		.find(".task-tracker-epic-header[data-name], .task-tracker-story-header[data-name]")
+		.on("click", function () {
 			frappe.set_route("Form", "Task", $(this).attr("data-name"));
-		}
-	);
+		});
 }
