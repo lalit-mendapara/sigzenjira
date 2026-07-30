@@ -30,27 +30,44 @@ def _expand_assignments(tasks):
 
 
 @frappe.whitelist()
-def get_tracker_data(project=None, employee=None):
+def get_tracker_data(project: str | None = None, employee: str | None = None):
+	if not set(frappe.get_roles(frappe.session.user)) & {"Projects User", MANAGER_ROLE}:
+		frappe.throw(frappe._("Not permitted"), frappe.PermissionError)
+
 	is_manager = _is_manager()
 	if not is_manager:
 		employee = frappe.session.user
 
+	# Deliberately unscoped: this page's whole point is that Projects Manager sees
+	# every task site-wide, regardless of any Project/Company User Permission that
+	# would otherwise scope Task for them. See test_manager_sees_all_employees_tasks.
 	all_rows = _expand_assignments(frappe.get_all("Task", fields=TASK_FIELDS))
 	if not is_manager:
 		all_rows = [r for r in all_rows if r["assigned_to"] == employee]
 
 	project_counts = {}
 	employee_counts = {}
+	seen_project_tasks = set()
 	for row in all_rows:
 		if row["project"]:
-			project_counts[row["project"]] = project_counts.get(row["project"], 0) + 1
+			task_project_key = (row["project"], row["name"])
+			if task_project_key not in seen_project_tasks:
+				seen_project_tasks.add(task_project_key)
+				project_counts[row["project"]] = project_counts.get(row["project"], 0) + 1
 		if row["assigned_to"]:
 			employee_counts[row["assigned_to"]] = employee_counts.get(row["assigned_to"], 0) + 1
 
-	projects = []
-	for name, count in project_counts.items():
-		project_name = frappe.db.get_value("Project", name, "project_name") or name
-		projects.append({"name": name, "project_name": project_name, "task_count": count})
+	project_names = {}
+	if project_counts:
+		for proj in frappe.get_all(
+			"Project", filters={"name": ["in", list(project_counts.keys())]}, fields=["name", "project_name"]
+		):
+			project_names[proj["name"]] = proj["project_name"]
+
+	projects = [
+		{"name": name, "project_name": project_names.get(name, name), "task_count": count}
+		for name, count in project_counts.items()
+	]
 	projects.sort(key=lambda p: p["project_name"])
 
 	full_names = {}
@@ -66,10 +83,9 @@ def get_tracker_data(project=None, employee=None):
 	]
 	employees.sort(key=lambda e: e["full_name"])
 
-	task_filters = {}
+	filtered_rows = all_rows
 	if project:
-		task_filters["project"] = project
-	filtered_rows = _expand_assignments(frappe.get_all("Task", filters=task_filters, fields=TASK_FIELDS))
+		filtered_rows = [r for r in filtered_rows if r["project"] == project]
 	if employee:
 		filtered_rows = [r for r in filtered_rows if r["assigned_to"] == employee]
 

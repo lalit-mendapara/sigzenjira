@@ -19,6 +19,7 @@ def after_install():
 	create_task_template_employee_docperm()
 	create_additional_hours_request_workflow()
 	create_pm_dashboard()
+	add_task_tracker_workspace_shortcut()
 	create_kanban_board_docperm()
 	create_pm_kanban_boards()
 	frappe.clear_cache(doctype="Task")
@@ -323,6 +324,7 @@ def get_task_tracker_workspace_shortcut():
 
 
 def add_task_tracker_workspace_shortcut():
+	# Same LinkValidationError landmine as add_pm_dashboard_workspace_shortcut above.
 	shortcut = get_task_tracker_workspace_shortcut()
 	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
 		doc = frappe.new_doc("Workspace Shortcut")
@@ -342,7 +344,13 @@ def add_task_tracker_workspace_shortcut():
 		for block in content
 	)
 	if not already_present:
-		content.append({"type": "shortcut", "data": {"shortcut_name": shortcut["label"], "col": 4}})
+		content.append(
+			{
+				"id": "sigzenjiraTaskTrackerShortcut",
+				"type": "shortcut",
+				"data": {"shortcut_name": shortcut["label"], "col": 4},
+			}
+		)
 		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
 
 

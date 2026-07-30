@@ -119,8 +119,32 @@ class TestTaskTracker(IntegrationTestCase):
 		self.assertIn(project_a, project_names)
 		self.assertIn(project_b, project_names)
 
+	def test_employee_roster_scoped_to_own_tasks_not_just_task_list(self):
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project_a = ensure_project("TT Roster Project A")
+		project_b = ensure_project("TT Roster Project B")
+
+		make_task("TT Roster Own", project=project_a, assignee=employee)
+		make_task("TT Roster Other", project=project_b, assignee=other)
+
+		frappe.set_user(employee)
+		try:
+			data = get_tracker_data()
+		finally:
+			frappe.set_user("Administrator")
+
+		employee_names = {e["name"] for e in data["employees"]}
+		project_names = {p["name"] for p in data["projects"]}
+		self.assertEqual(employee_names, {employee})
+		self.assertEqual(project_names, {project_a})
+
 
 class TestTaskTrackerWorkspaceShortcut(IntegrationTestCase):
+	def test_shortcut_link_to_points_at_existing_page(self):
+		add_task_tracker_workspace_shortcut()
+		self.assertTrue(frappe.db.exists("Page", "task-tracker"))
+
 	def test_creates_shortcut_once_and_is_idempotent(self):
 		add_task_tracker_workspace_shortcut()
 		count_after_first = frappe.db.count(
