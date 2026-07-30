@@ -1,3 +1,4 @@
+/* apps/sigzenjira/sigzenjira/sigzenjira/page/task_tracker/task_tracker.css */
 .task-tracker-topbar {
 	display: flex;
 	align-items: center;
@@ -11,8 +12,7 @@
 }
 
 .task-tracker-project-select,
-.task-tracker-employee-select,
-.task-tracker-work-item-select {
+.task-tracker-employee-select {
 	width: 220px;
 }
 
@@ -27,9 +27,70 @@
 
 .task-tracker-board {
 	display: flex;
+	flex-direction: column;
+	gap: 20px;
+	padding-left: 16px;
+}
+
+.task-tracker-epic {
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 12px;
+}
+
+.task-tracker-epic-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+
+.task-tracker-epic-header[data-name] {
+	cursor: pointer;
+}
+
+.task-tracker-epic-title {
+	font-weight: 600;
+	font-size: 14px;
+}
+
+.task-tracker-story {
+	margin-bottom: 16px;
+}
+
+.task-tracker-story:last-child {
+	margin-bottom: 0;
+}
+
+.task-tracker-story-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+	padding-left: 12px;
+}
+
+.task-tracker-story-header[data-name] {
+	cursor: pointer;
+}
+
+.task-tracker-story-title {
+	font-weight: 500;
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.task-tracker-no-match {
+	color: var(--text-muted);
+	font-size: 12px;
+	padding: 4px 0 4px 12px;
+}
+
+.task-tracker-columns {
+	display: flex;
 	gap: 16px;
 	align-items: flex-start;
-	padding-left: 16px;
+	padding-left: 12px;
 }
 
 .task-tracker-column {
@@ -116,7 +177,7 @@
 .task-tracker-card-footer {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: flex-end;
 	gap: 8px;
 }
 
