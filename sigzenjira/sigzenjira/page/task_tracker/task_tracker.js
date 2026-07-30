@@ -1,3 +1,15 @@
+const STATUS_COLUMN = {
+	Open: "To Do",
+	Template: "To Do",
+	Working: "In Progress",
+	"Pending Review": "In Review",
+	Completed: "Done",
+	Cancelled: "Done",
+	Overdue: "To Do",
+};
+
+const BOARD_COLUMNS = ["To Do", "In Progress", "In Review", "Done"];
+
 frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 	const page = frappe.ui.make_app_page({
 		parent: wrapper,
@@ -6,15 +18,28 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 	});
 
 	wrapper.tracker_state = { project: null, employee: null };
+	wrapper.$projects = null;
 
 	wrapper.$layout = $(`<div class="task-tracker-layout">
 		<div class="task-tracker-topbar" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border-color);">
-			<div class="task-tracker-projects" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"></div>
-			<div class="task-tracker-divider" style="width:1px; align-self:stretch; background:var(--border-color);"></div>
-			<div class="task-tracker-employees" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"></div>
+			<select class="task-tracker-project-select form-control" style="width:220px;"></select>
+			<select class="task-tracker-employee-select form-control" style="width:220px;" disabled></select>
 		</div>
-		<div class="task-tracker-main"></div>
+		<div class="task-tracker-board"></div>
 	</div>`).appendTo(page.main);
+
+	wrapper.$layout.find(".task-tracker-project-select").on("change", function () {
+		wrapper.tracker_state.project = $(this).val() || null;
+		wrapper.tracker_state.employee = null;
+		fetch_and_render(wrapper);
+	});
+
+	wrapper.$layout.find(".task-tracker-employee-select").on("change", function () {
+		wrapper.tracker_state.employee = $(this).val() || null;
+		fetch_and_render(wrapper);
+	});
+
+	fetch_and_render(wrapper);
 };
 
 frappe.pages["task-tracker"].refresh = (wrapper) => {
@@ -22,6 +47,15 @@ frappe.pages["task-tracker"].refresh = (wrapper) => {
 };
 
 function fetch_and_render(wrapper) {
+	if (!wrapper.tracker_state.project && wrapper.$projects !== null) {
+		// Project list already known from an earlier load — no server round-trip
+		// needed just to show the empty state.
+		render_project_select(wrapper);
+		render_employee_select(wrapper, []);
+		render_board(wrapper, [], []);
+		return;
+	}
+
 	frappe.call({
 		method: "sigzenjira.sigzenjira.task_tracker.get_tracker_data",
 		args: {
@@ -29,138 +63,89 @@ function fetch_and_render(wrapper) {
 			employee: wrapper.tracker_state.employee,
 		},
 		callback: (r) => {
-			render_topbar(wrapper, r.message);
-			render_main(wrapper, r.message);
+			wrapper.$projects = r.message.projects;
+			render_project_select(wrapper);
+			render_employee_select(wrapper, r.message.employees);
+			render_board(wrapper, r.message.tasks, r.message.employees);
 		},
 	});
 }
 
-function render_topbar(wrapper, data) {
-	const $projects = wrapper.$layout.find(".task-tracker-projects").empty();
-	$projects.append(`<span class="text-muted small" style="margin-right:4px;">${__("Projects")}:</span>`);
-	data.projects.forEach((project) => {
-		const active = wrapper.tracker_state.project === project.name;
-		const $pill = $(
-			`<span class="task-tracker-item indicator-pill ${active ? "blue" : "gray"}" style="cursor:pointer;">${frappe.utils.escape_html(project.project_name)} (${project.task_count})</span>`
-		);
-		$pill.on("click", () => {
-			wrapper.tracker_state.project = active ? null : project.name;
-			fetch_and_render(wrapper);
-		});
-		$projects.append($pill);
-	});
-
-	const $employees = wrapper.$layout.find(".task-tracker-employees").empty();
-	$employees.append(`<span class="text-muted small" style="margin-right:4px;">${__("Employees")}:</span>`);
-	data.employees.forEach((employee) => {
-		const active = wrapper.tracker_state.employee === employee.name;
-		const $pill = $(
-			`<span class="task-tracker-item indicator-pill ${active ? "blue" : "gray"}" style="cursor:pointer;">${frappe.utils.escape_html(employee.full_name)} (${employee.task_count})</span>`
-		);
-		$pill.on("click", () => {
-			wrapper.tracker_state.employee = active ? null : employee.name;
-			fetch_and_render(wrapper);
-		});
-		$employees.append($pill);
-	});
+function render_project_select(wrapper) {
+	const $select = wrapper.$layout.find(".task-tracker-project-select");
+	const current = wrapper.tracker_state.project || "";
+	const options = [`<option value="">${__("Select project")}</option>`]
+		.concat(
+			(wrapper.$projects || []).map(
+				(p) =>
+					`<option value="${frappe.utils.escape_html(p.name)}" ${p.name === current ? "selected" : ""}>${frappe.utils.escape_html(p.project_name)} (${p.task_count})</option>`
+			)
+		)
+		.join("");
+	$select.html(options);
 }
 
-const STATUS_COLORS = {
-	Open: "gray",
-	Working: "blue",
-	"Pending Review": "orange",
-	Overdue: "red",
-	Blocked: "orange",
-	Template: "gray",
-	Completed: "green",
-	Cancelled: "darkgrey",
-};
-
-function status_badge(status) {
-	const color = STATUS_COLORS[status] || "gray";
-	return `<span class="indicator-pill ${color}">${frappe.utils.escape_html(status || "")}</span>`;
+function render_employee_select(wrapper, employees) {
+	const $select = wrapper.$layout.find(".task-tracker-employee-select");
+	const current = wrapper.tracker_state.employee || "";
+	$select.prop("disabled", !wrapper.tracker_state.project);
+	const options = [`<option value="">${__("All employees")}</option>`]
+		.concat(
+			(employees || []).map(
+				(e) =>
+					`<option value="${frappe.utils.escape_html(e.name)}" ${e.name === current ? "selected" : ""}>${frappe.utils.escape_html(e.full_name)} (${e.task_count})</option>`
+			)
+		)
+		.join("");
+	$select.html(options);
 }
 
-function task_row_html(task, show_project, project_names) {
-	const project_cell = show_project
-		? `<td>${frappe.utils.escape_html((project_names && project_names[task.project]) || task.project || "")}</td>`
-		: "";
-	return `<tr class="task-tracker-row" data-task="${frappe.utils.escape_html(task.name)}" style="cursor:pointer;">
-		<td>${frappe.utils.escape_html(task.subject)}</td>
-		<td>${frappe.utils.escape_html(task.work_item_type || "")}</td>
-		<td>${status_badge(task.status)}</td>
-		${project_cell}
-	</tr>`;
+function task_card_html(task, full_names) {
+	const assignee = task.assigned_to
+		? frappe.utils.escape_html(full_names[task.assigned_to] || task.assigned_to)
+		: __("Unassigned");
+	const overdue_flag =
+		task.status === "Overdue"
+			? `<span class="indicator-pill red" style="margin-bottom:4px;">${__("Overdue")}</span>`
+			: "";
+	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}" style="cursor:pointer; border:1px solid var(--border-color); border-radius:6px; padding:8px; margin-bottom:8px;">
+		${overdue_flag}
+		<div>${frappe.utils.escape_html(task.subject)}</div>
+		<div class="text-muted small">${frappe.utils.escape_html(task.work_item_type || "")}</div>
+		<div class="text-muted small">${assignee}</div>
+	</div>`;
 }
 
-function wire_row_clicks($container) {
-	$container.find(".task-tracker-row").on("click", function () {
-		frappe.set_route("Form", "Task", $(this).attr("data-task"));
-	});
-}
+function render_board(wrapper, tasks, employees) {
+	const $board = wrapper.$layout.find(".task-tracker-board").empty();
 
-function render_main(wrapper, data) {
-	const $main = wrapper.$layout.find(".task-tracker-main").empty();
-
-	const project_names = {};
-	data.projects.forEach((p) => (project_names[p.name] = p.project_name));
-
-	if (wrapper.tracker_state.employee) {
-		// Flat mode: single employee already picked, show Project column instead of grouping.
-		const rows = data.tasks.map((t) => task_row_html(t, true, project_names)).join("");
-		const $table = $(`<table class="table table-bordered">
-			<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th><th>${__("Project")}</th></tr></thead>
-			<tbody>${rows || `<tr><td colspan="4" class="text-muted">${__("No tasks found")}</td></tr>`}</tbody>
-		</table>`);
-		$main.append($table);
-		wire_row_clicks($table);
+	if (!wrapper.tracker_state.project) {
+		$board.css({ display: "block" });
+		$board.append(`<div class="text-muted">${__("Select a project to view its board")}</div>`);
 		return;
 	}
 
-	// Grouped mode: bucket the flat task list by assigned_to.
-	const groups = {};
-	const unassigned = [];
-	data.tasks.forEach((t) => {
-		if (!t.assigned_to) {
-			unassigned.push(t);
-			return;
-		}
-		groups[t.assigned_to] = groups[t.assigned_to] || [];
-		groups[t.assigned_to].push(t);
+	const full_names = {};
+	(employees || []).forEach((e) => (full_names[e.name] = e.full_name));
+
+	const columns = {};
+	BOARD_COLUMNS.forEach((c) => (columns[c] = []));
+	tasks.forEach((t) => {
+		const column = STATUS_COLUMN[t.status] || "To Do";
+		columns[column].push(t);
 	});
 
-	const full_names = {};
-	data.employees.forEach((e) => (full_names[e.name] = e.full_name));
-
-	Object.keys(groups)
-		.sort((a, b) => (full_names[a] || a).localeCompare(full_names[b] || b))
-		.forEach((user) => {
-			const rows = groups[user].map((t) => task_row_html(t, false)).join("");
-			const $section = $(`<div style="margin-bottom:20px;">
-				<h5>${frappe.utils.escape_html(full_names[user] || user)}</h5>
-				<table class="table table-bordered">
-					<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th></tr></thead>
-					<tbody>${rows}</tbody>
-				</table>
-			</div>`);
-			$main.append($section);
-			wire_row_clicks($section);
-		});
-
-	if (unassigned.length) {
-		const rows = unassigned.map((t) => task_row_html(t, false)).join("");
-		const $section = $(`<div style="margin-bottom:20px;">
-			<h5 class="text-muted">${__("Unassigned")}</h5>
-			<table class="table table-bordered">
-				<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th></tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
+	$board.css({ display: "flex", gap: "16px", "align-items": "flex-start" });
+	BOARD_COLUMNS.forEach((column_name) => {
+		const cards = columns[column_name].map((t) => task_card_html(t, full_names)).join("");
+		const $column = $(`<div class="task-tracker-column" style="flex:1; min-width:220px;">
+			<h6>${__(column_name)} (${columns[column_name].length})</h6>
+			<div class="task-tracker-column-body">${cards}</div>
 		</div>`);
-		$main.append($section);
-		wire_row_clicks($section);
-	}
+		$board.append($column);
+	});
 
-	if (!Object.keys(groups).length && !unassigned.length) {
-		$main.append(`<div class="text-muted">${__("No tasks found")}</div>`);
-	}
+	$board.find(".task-tracker-card").on("click", function () {
+		frappe.set_route("Form", "Task", $(this).attr("data-task"));
+	});
 }
