@@ -67,7 +67,96 @@ function render_topbar(wrapper, data) {
 	});
 }
 
+const STATUS_COLORS = {
+	Open: "gray",
+	Working: "blue",
+	"Pending Review": "orange",
+	Overdue: "red",
+	Template: "gray",
+	Completed: "green",
+	Cancelled: "darkgrey",
+};
+
+function status_badge(status) {
+	const color = STATUS_COLORS[status] || "gray";
+	return `<span class="indicator-pill ${color}">${frappe.utils.escape_html(status || "")}</span>`;
+}
+
+function task_row_html(task, show_project) {
+	const project_cell = show_project ? `<td>${frappe.utils.escape_html(task.project || "")}</td>` : "";
+	return `<tr class="task-tracker-row" data-task="${frappe.utils.escape_html(task.name)}" style="cursor:pointer;">
+		<td>${frappe.utils.escape_html(task.subject)}</td>
+		<td>${frappe.utils.escape_html(task.work_item_type || "")}</td>
+		<td>${status_badge(task.status)}</td>
+		${project_cell}
+	</tr>`;
+}
+
+function wire_row_clicks($container) {
+	$container.find(".task-tracker-row").on("click", function () {
+		frappe.set_route("Form", "Task", $(this).attr("data-task"));
+	});
+}
+
 function render_main(wrapper, data) {
-	// Stub — Task 4 replaces this with grouped/flat rendering.
-	wrapper.find(".task-tracker-main").html(`<pre>${frappe.utils.escape_html(JSON.stringify(data.tasks, null, 2))}</pre>`);
+	const $main = wrapper.find(".task-tracker-main").empty();
+
+	if (wrapper.tracker_state.employee) {
+		// Flat mode: single employee already picked, show Project column instead of grouping.
+		const rows = data.tasks.map((t) => task_row_html(t, true)).join("");
+		const $table = $(`<table class="table table-bordered">
+			<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th><th>${__("Project")}</th></tr></thead>
+			<tbody>${rows || `<tr><td colspan="4" class="text-muted">${__("No tasks found")}</td></tr>`}</tbody>
+		</table>`);
+		$main.append($table);
+		wire_row_clicks($table);
+		return;
+	}
+
+	// Grouped mode: bucket the flat task list by assigned_to.
+	const groups = {};
+	const unassigned = [];
+	data.tasks.forEach((t) => {
+		if (!t.assigned_to) {
+			unassigned.push(t);
+			return;
+		}
+		groups[t.assigned_to] = groups[t.assigned_to] || [];
+		groups[t.assigned_to].push(t);
+	});
+
+	const full_names = {};
+	data.employees.forEach((e) => (full_names[e.name] = e.full_name));
+
+	Object.keys(groups)
+		.sort((a, b) => (full_names[a] || a).localeCompare(full_names[b] || b))
+		.forEach((user) => {
+			const rows = groups[user].map((t) => task_row_html(t, false)).join("");
+			const $section = $(`<div style="margin-bottom:20px;">
+				<h5>${frappe.utils.escape_html(full_names[user] || user)}</h5>
+				<table class="table table-bordered">
+					<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th></tr></thead>
+					<tbody>${rows}</tbody>
+				</table>
+			</div>`);
+			$main.append($section);
+			wire_row_clicks($section);
+		});
+
+	if (unassigned.length) {
+		const rows = unassigned.map((t) => task_row_html(t, false)).join("");
+		const $section = $(`<div style="margin-bottom:20px;">
+			<h5 class="text-muted">${__("Unassigned")}</h5>
+			<table class="table table-bordered">
+				<thead><tr><th>${__("Task")}</th><th>${__("Type")}</th><th>${__("Status")}</th></tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+		</div>`);
+		$main.append($section);
+		wire_row_clicks($section);
+	}
+
+	if (!Object.keys(groups).length && !unassigned.length) {
+		$main.append(`<div class="text-muted">${__("No tasks found")}</div>`);
+	}
 }
