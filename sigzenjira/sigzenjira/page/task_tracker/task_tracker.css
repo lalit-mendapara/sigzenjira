@@ -1,0 +1,140 @@
+.task-tracker-topbar {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	flex-wrap: wrap;
+	padding-bottom: 12px;
+	margin-bottom: 16px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.task-tracker-project-select,
+.task-tracker-employee-select {
+	width: 220px;
+}
+
+.task-tracker-empty-state {
+	color: var(--text-muted);
+	padding: 24px 0;
+}
+
+.task-tracker-board {
+	display: flex;
+	gap: 16px;
+	align-items: flex-start;
+}
+
+.task-tracker-column {
+	flex: 1;
+	min-width: 240px;
+	background: var(--subtle-fg, var(--fg-color));
+	border-radius: 8px;
+	padding: 4px 4px 8px;
+}
+
+.task-tracker-column-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 8px 6px;
+	margin: 0;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	border-top: 3px solid var(--gray-500);
+	border-radius: 4px 4px 0 0;
+}
+
+.task-tracker-column[data-column="In Progress"] .task-tracker-column-header {
+	border-top-color: var(--blue-500);
+}
+
+.task-tracker-column[data-column="In Review"] .task-tracker-column-header {
+	border-top-color: var(--orange-500);
+}
+
+.task-tracker-column[data-column="Done"] .task-tracker-column-header {
+	border-top-color: var(--green-500);
+}
+
+.task-tracker-column-count {
+	font-weight: 400;
+}
+
+.task-tracker-column-body {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px;
+	min-height: 40px;
+}
+
+.task-tracker-card {
+	cursor: pointer;
+	background: var(--card-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 10px 12px;
+	box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.06));
+	transition:
+		box-shadow 0.15s ease,
+		transform 0.15s ease;
+}
+
+.task-tracker-card:hover {
+	box-shadow: var(--shadow-md, 0 4px 10px rgba(0, 0, 0, 0.12));
+	transform: translateY(-1px);
+}
+
+.task-tracker-card-flags {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+	margin-bottom: 6px;
+}
+
+.task-tracker-card-flags:empty {
+	display: none;
+}
+
+.task-tracker-card-title {
+	font-size: 13px;
+	color: var(--text-color);
+	margin-bottom: 6px;
+}
+
+.task-tracker-card-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.task-tracker-avatars {
+	display: flex;
+}
+
+.task-tracker-avatar {
+	width: 22px;
+	height: 22px;
+	border-radius: 50%;
+	background: var(--blue-500);
+	color: white;
+	font-size: 10px;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 2px solid var(--card-bg);
+	margin-left: -6px;
+}
+
+.task-tracker-avatar:first-child {
+	margin-left: 0;
+}
+
+.task-tracker-avatar.task-tracker-avatar-empty {
+	background: var(--gray-500);
+}

@@ -22,9 +22,9 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 	wrapper.$projects = null;
 
 	wrapper.$layout = $(`<div class="task-tracker-layout">
-		<div class="task-tracker-topbar" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-bottom:12px; margin-bottom:12px; border-bottom:1px solid var(--border-color);">
-			<select class="task-tracker-project-select form-control" style="width:220px;"></select>
-			<select class="task-tracker-employee-select form-control" style="width:220px;" disabled></select>
+		<div class="task-tracker-topbar">
+			<select class="task-tracker-project-select form-control"></select>
+			<select class="task-tracker-employee-select form-control" disabled></select>
 		</div>
 		<div class="task-tracker-board"></div>
 	</div>`).appendTo(page.main);
@@ -99,24 +99,35 @@ function render_employee_select(wrapper, employees) {
 	$select.html(options);
 }
 
+function get_initials(name) {
+	return (name || "?")
+		.split(" ")
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part[0].toUpperCase())
+		.join("");
+}
+
 function task_card_html(task, full_names) {
-	const assignee = task.assignees.length
-		? task.assignees.map((a) => frappe.utils.escape_html(full_names[a] || a)).join(", ")
-		: __("Unassigned");
+	const avatars = task.assignees.length
+		? task.assignees
+				.map((a) => {
+					const name = full_names[a] || a;
+					return `<span class="task-tracker-avatar" title="${frappe.utils.escape_html(name)}">${frappe.utils.escape_html(get_initials(name))}</span>`;
+				})
+				.join("")
+		: `<span class="task-tracker-avatar task-tracker-avatar-empty" title="${__("Unassigned")}">?</span>`;
 	const overdue_flag =
-		task.status === "Overdue"
-			? `<span class="indicator-pill red" style="margin-bottom:4px;">${__("Overdue")}</span>`
-			: "";
+		task.status === "Overdue" ? `<span class="indicator-pill red">${__("Overdue")}</span>` : "";
 	const blocked_flag =
-		task.status === "Blocked"
-			? `<span class="indicator-pill orange" style="margin-bottom:4px;">${__("Blocked")}</span>`
-			: "";
-	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}" style="cursor:pointer; border:1px solid var(--border-color); border-radius:6px; padding:8px; margin-bottom:8px;">
-		${overdue_flag}
-		${blocked_flag}
-		<div>${frappe.utils.escape_html(task.subject)}</div>
-		<div class="text-muted small">${frappe.utils.escape_html(task.work_item_type || "")}</div>
-		<div class="text-muted small">${assignee}</div>
+		task.status === "Blocked" ? `<span class="indicator-pill orange">${__("Blocked")}</span>` : "";
+	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}">
+		<div class="task-tracker-card-flags">${overdue_flag}${blocked_flag}</div>
+		<div class="task-tracker-card-title">${frappe.utils.escape_html(task.subject)}</div>
+		<div class="task-tracker-card-footer">
+			<span class="text-muted small">${frappe.utils.escape_html(task.work_item_type || "")}</span>
+			<span class="task-tracker-avatars">${avatars}</span>
+		</div>
 	</div>`;
 }
 
@@ -124,8 +135,9 @@ function render_board(wrapper, tasks, employees) {
 	const $board = wrapper.$layout.find(".task-tracker-board").empty();
 
 	if (!wrapper.tracker_state.project) {
-		$board.css({ display: "block" });
-		$board.append(`<div class="text-muted">${__("Select a project to view its board")}</div>`);
+		$board.append(
+			`<div class="task-tracker-empty-state">${__("Select a project to view its board")}</div>`
+		);
 		return;
 	}
 
@@ -151,11 +163,13 @@ function render_board(wrapper, tasks, employees) {
 		columns[column].push(t);
 	});
 
-	$board.css({ display: "flex", gap: "16px", "align-items": "flex-start" });
 	BOARD_COLUMNS.forEach((column_name) => {
 		const cards = columns[column_name].map((t) => task_card_html(t, full_names)).join("");
-		const $column = $(`<div class="task-tracker-column" style="flex:1; min-width:220px;">
-			<h6>${__(column_name)} (${columns[column_name].length})</h6>
+		const $column = $(`<div class="task-tracker-column" data-column="${column_name}">
+			<h6 class="task-tracker-column-header">
+				<span>${__(column_name)}</span>
+				<span class="task-tracker-column-count">${columns[column_name].length}</span>
+			</h6>
 			<div class="task-tracker-column-body">${cards}</div>
 		</div>`);
 		$board.append($column);
