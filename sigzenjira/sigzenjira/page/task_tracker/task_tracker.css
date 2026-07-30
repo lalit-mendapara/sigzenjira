@@ -4,13 +4,20 @@
 	gap: 16px;
 	flex-wrap: wrap;
 	padding-bottom: 12px;
+	padding-top: 12px;
+	padding-left: 16px;
 	margin-bottom: 16px;
 	border-bottom: 1px solid var(--border-color);
 }
 
 .task-tracker-project-select,
-.task-tracker-employee-select {
+.task-tracker-employee-select,
+.task-tracker-work-item-select {
 	width: 220px;
+}
+
+.task-tracker-ecd-input {
+	width: 160px;
 }
 
 .task-tracker-empty-state {
@@ -22,6 +29,7 @@
 	display: flex;
 	gap: 16px;
 	align-items: flex-start;
+	padding-left: 16px;
 }
 
 .task-tracker-column {

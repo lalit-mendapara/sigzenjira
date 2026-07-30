@@ -4,7 +4,7 @@ import frappe
 
 MANAGER_ROLE = "Projects Manager"
 
-TASK_FIELDS = ["name", "subject", "custom_work_item_type", "status", "project", "_assign"]
+TASK_FIELDS = ["name", "subject", "custom_work_item_type", "status", "project", "_assign", "exp_end_date"]
 
 
 def _is_manager():
@@ -24,6 +24,7 @@ def _expand_assignments(tasks):
 					"status": task["status"],
 					"project": task["project"],
 					"assigned_to": user,
+					"exp_end_date": task.get("exp_end_date"),
 				}
 			)
 	return rows

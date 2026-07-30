@@ -17,13 +17,30 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 		single_column: true,
 	});
 
-	wrapper.tracker_state = { project: null, employee: null };
+	wrapper.tracker_state = {
+		project: null,
+		employee: null,
+		work_item_type: null,
+		ecd: frappe.datetime.get_today(),
+	};
 	wrapper.$projects = null;
+	wrapper.$tasks = [];
+	wrapper.$employees = [];
+
+	const work_item_types = ["", "Epic", "Story", "Task", "Sub-task"];
+	const work_item_options = work_item_types
+		.map(
+			(t) =>
+				`<option value="${t}">${t ? frappe.utils.escape_html(t) : __("All types")}</option>`
+		)
+		.join("");
 
 	wrapper.$layout = $(`<div class="task-tracker-layout">
 		<div class="task-tracker-topbar">
 			<select class="task-tracker-project-select form-control"></select>
 			<select class="task-tracker-employee-select form-control" disabled></select>
+			<select class="task-tracker-work-item-select form-control">${work_item_options}</select>
+			<input type="date" class="task-tracker-ecd-input form-control" value="${wrapper.tracker_state.ecd}">
 		</div>
 		<div class="task-tracker-board"></div>
 	</div>`).appendTo(page.main);
@@ -38,6 +55,16 @@ frappe.pages["task-tracker"].on_page_load = (wrapper) => {
 		wrapper.tracker_state.employee = $(this).val() || null;
 		fetch_and_render(wrapper);
 	});
+
+	wrapper.$layout.find(".task-tracker-work-item-select").on("change", function () {
+		wrapper.tracker_state.work_item_type = $(this).val() || null;
+		render_board(wrapper, wrapper.$tasks, wrapper.$employees);
+	});
+
+	wrapper.$layout.find(".task-tracker-ecd-input").on("change", function () {
+		wrapper.tracker_state.ecd = $(this).val() || null;
+		render_board(wrapper, wrapper.$tasks, wrapper.$employees);
+	});
 };
 
 frappe.pages["task-tracker"].refresh = (wrapper) => {
@@ -48,6 +75,8 @@ function fetch_and_render(wrapper) {
 	if (!wrapper.tracker_state.project && wrapper.$projects !== null) {
 		// Project list already known from an earlier load — no server round-trip
 		// needed just to show the empty state.
+		wrapper.$tasks = [];
+		wrapper.$employees = [];
 		render_project_select(wrapper);
 		render_employee_select(wrapper, []);
 		render_board(wrapper, [], []);
@@ -62,6 +91,8 @@ function fetch_and_render(wrapper) {
 		},
 		callback: (r) => {
 			wrapper.$projects = r.message.projects;
+			wrapper.$tasks = r.message.tasks;
+			wrapper.$employees = r.message.employees;
 			render_project_select(wrapper);
 			render_employee_select(wrapper, r.message.employees);
 			render_board(wrapper, r.message.tasks, r.message.employees);
@@ -145,10 +176,17 @@ function render_board(wrapper, tasks, employees) {
 	const full_names = {};
 	(employees || []).forEach((e) => (full_names[e.name] = e.full_name));
 
+	const { work_item_type, ecd } = wrapper.tracker_state;
+	const filtered_tasks = tasks.filter((t) => {
+		if (work_item_type && t.work_item_type !== work_item_type) return false;
+		if (ecd && (!t.exp_end_date || t.exp_end_date.slice(0, 10) > ecd)) return false;
+		return true;
+	});
+
 	// One row per assignee comes in from the server; collapse back to one card
 	// per task, listing all its assignees together.
 	const deduped_tasks = {};
-	tasks.forEach((t) => {
+	filtered_tasks.forEach((t) => {
 		if (!deduped_tasks[t.name]) {
 			deduped_tasks[t.name] = { ...t, assignees: [] };
 		}
