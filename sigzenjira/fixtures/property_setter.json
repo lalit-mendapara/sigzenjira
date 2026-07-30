@@ -301,7 +301,7 @@
   "property": "options",
   "property_type": "Select",
   "row_name": null,
-  "value": "Open\nWorking\nPending Review\nOverdue\nTemplate\nCompleted\nCancelled\nBlocked"
+  "value": "Open\nWorking\nPending Review\nOverdue\nCompleted\nCancelled\nBlocked"
  },
  {
   "default_value": null,

@@ -1,6 +1,5 @@
 const STATUS_COLUMN = {
 	Open: "To Do",
-	Template: "To Do",
 	Working: "In Progress",
 	"Pending Review": "In Review",
 	Completed: "Done",
@@ -121,8 +120,10 @@ function task_card_html(task, full_names) {
 		task.status === "Overdue" ? `<span class="indicator-pill red">${__("Overdue")}</span>` : "";
 	const blocked_flag =
 		task.status === "Blocked" ? `<span class="indicator-pill orange">${__("Blocked")}</span>` : "";
+	const cancelled_flag =
+		task.status === "Cancelled" ? `<span class="indicator-pill darkgrey">${__("Cancelled")}</span>` : "";
 	return `<div class="task-tracker-card" data-task="${frappe.utils.escape_html(task.name)}">
-		<div class="task-tracker-card-flags">${overdue_flag}${blocked_flag}</div>
+		<div class="task-tracker-card-flags">${overdue_flag}${blocked_flag}${cancelled_flag}</div>
 		<div class="task-tracker-card-title">${frappe.utils.escape_html(task.subject)}</div>
 		<div class="task-tracker-card-footer">
 			<span class="text-muted small">${frappe.utils.escape_html(task.work_item_type || "")}</span>

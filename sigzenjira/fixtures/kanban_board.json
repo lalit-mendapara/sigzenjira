@@ -42,12 +42,6 @@
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
-   },
-   {
-    "column_name": "Template",
-    "indicator": "Gray",
-    "order": "[]",
-    "status": "Active"
    }
   ],
   "docstatus": 0,

@@ -12,7 +12,6 @@ def get_kanban_boards():
 				"Overdue",
 				"Completed",
 				"Cancelled",
-				"Template",
 			],
 			"filters": [],
 			"private": 0,

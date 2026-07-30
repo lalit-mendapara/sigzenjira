@@ -34,7 +34,7 @@ def set_task_search_fields():
 	make_property_setter("Task", None, "search_fields", "subject,custom_work_item_type", "Data", for_doctype=True)
 
 
-TASK_STATUS_OPTIONS = "Open\nWorking\nPending Review\nOverdue\nTemplate\nCompleted\nCancelled\nBlocked"
+TASK_STATUS_OPTIONS = "Open\nWorking\nPending Review\nOverdue\nCompleted\nCancelled\nBlocked"
 ISSUE_STATUS_OPTIONS = "Open\nWIP\nIN-QA\nIN-UAT\nResolved\nOn Hold\nClosed"
 
 
