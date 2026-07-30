@@ -25,3 +25,4 @@ sigzenjira.patches.v0_0.remove_task_project_name_field
 sigzenjira.patches.v0_0.remove_work_item_hierarchy_board
 sigzenjira.patches.v0_0.wire_project_user_hour_flags
 sigzenjira.patches.v0_0.widen_additional_hours_request_approval_role
+sigzenjira.patches.v0_0.add_task_tracker_shortcut

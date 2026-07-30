@@ -1,7 +1,10 @@
+import json
+
 import frappe
 from frappe.desk.form import assign_to
 from frappe.tests import IntegrationTestCase
 
+from sigzenjira.install import add_task_tracker_workspace_shortcut
 from sigzenjira.sigzenjira.task_tracker import get_tracker_data
 
 MANAGER_USER = "test_tracker_manager@example.com"
@@ -115,3 +118,24 @@ class TestTaskTracker(IntegrationTestCase):
 		project_names = {p["name"] for p in data["projects"]}
 		self.assertIn(project_a, project_names)
 		self.assertIn(project_b, project_names)
+
+
+class TestTaskTrackerWorkspaceShortcut(IntegrationTestCase):
+	def test_creates_shortcut_once_and_is_idempotent(self):
+		add_task_tracker_workspace_shortcut()
+		count_after_first = frappe.db.count(
+			"Workspace Shortcut", {"parent": "Project Management", "link_to": "task-tracker"}
+		)
+		self.assertEqual(count_after_first, 1)
+
+		add_task_tracker_workspace_shortcut()
+		count_after_second = frappe.db.count(
+			"Workspace Shortcut", {"parent": "Project Management", "link_to": "task-tracker"}
+		)
+		self.assertEqual(count_after_second, 1)
+
+		content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
+		shortcut_blocks = [
+			b for b in content if b.get("type") == "shortcut" and b.get("data", {}).get("shortcut_name") == "Task Tracker"
+		]
+		self.assertEqual(len(shortcut_blocks), 1)

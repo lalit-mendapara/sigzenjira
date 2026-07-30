@@ -314,6 +314,38 @@ def add_pm_dashboard_workspace_shortcut():
 		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
 
 
+def get_task_tracker_workspace_shortcut():
+	return {
+		"label": "Task Tracker",
+		"type": "Page",
+		"link_to": "task-tracker",
+	}
+
+
+def add_task_tracker_workspace_shortcut():
+	shortcut = get_task_tracker_workspace_shortcut()
+	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+		doc = frappe.new_doc("Workspace Shortcut")
+		doc.update(
+			{
+				"parent": "Project Management",
+				"parenttype": "Workspace",
+				"parentfield": "shortcuts",
+				**shortcut,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+
+	content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
+	already_present = any(
+		block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == shortcut["label"]
+		for block in content
+	)
+	if not already_present:
+		content.append({"type": "shortcut", "data": {"shortcut_name": shortcut["label"], "col": 4}})
+		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
+
+
 def create_kanban_board_docperm():
 	# Core Kanban Board only grants read to Desk User / System Manager, and no
 	# sigzenjira role holds Desk User — so without this, nobody but System
