@@ -46,7 +46,6 @@ def get_tracker_data(project: str | None = None, employee: str | None = None):
 		all_rows = [r for r in all_rows if r["assigned_to"] == employee]
 
 	project_counts = {}
-	employee_counts = {}
 	seen_project_tasks = set()
 	for row in all_rows:
 		if row["project"]:
@@ -54,8 +53,15 @@ def get_tracker_data(project: str | None = None, employee: str | None = None):
 			if task_project_key not in seen_project_tasks:
 				seen_project_tasks.add(task_project_key)
 				project_counts[row["project"]] = project_counts.get(row["project"], 0) + 1
-		if row["assigned_to"]:
-			employee_counts[row["assigned_to"]] = employee_counts.get(row["assigned_to"], 0) + 1
+
+	# Unlike project_counts (a global total), employee_counts is scoped to the
+	# selected project only — the board's Employee dropdown lists that project's
+	# assignees, not every assignee the user can see. Empty when no project is chosen.
+	employee_counts = {}
+	if project:
+		for row in all_rows:
+			if row["project"] == project and row["assigned_to"]:
+				employee_counts[row["assigned_to"]] = employee_counts.get(row["assigned_to"], 0) + 1
 
 	project_names = {}
 	if project_counts:

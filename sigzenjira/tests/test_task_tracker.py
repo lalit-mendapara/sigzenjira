@@ -119,25 +119,55 @@ class TestTaskTracker(IntegrationTestCase):
 		self.assertIn(project_a, project_names)
 		self.assertIn(project_b, project_names)
 
-	def test_employee_roster_scoped_to_own_tasks_not_just_task_list(self):
+	def test_employees_empty_when_no_project(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
 		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
-		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
-		project_a = ensure_project("TT Roster Project A")
-		project_b = ensure_project("TT Roster Project B")
 
-		make_task("TT Roster Own", project=project_a, assignee=employee)
-		make_task("TT Roster Other", project=project_b, assignee=other)
+		make_task("TT No Project Employees", assignee=employee)
 
-		frappe.set_user(employee)
+		frappe.set_user(manager)
 		try:
 			data = get_tracker_data()
 		finally:
 			frappe.set_user("Administrator")
 
+		self.assertEqual(data["employees"], [])
+
+	def test_employees_scoped_to_selected_project(self):
+		manager = ensure_user(MANAGER_USER, "Tracker Manager", ["Projects Manager"])
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project_a = ensure_project("TT Roster Project A - scoped test")
+		project_b = ensure_project("TT Roster Project B - scoped test")
+
+		make_task("TT Roster A Task", project=project_a, assignee=employee)
+		make_task("TT Roster B Task", project=project_b, assignee=other)
+
+		frappe.set_user(manager)
+		try:
+			data = get_tracker_data(project=project_a)
+		finally:
+			frappe.set_user("Administrator")
+
 		employee_names = {e["name"] for e in data["employees"]}
-		project_names = {p["name"] for p in data["projects"]}
 		self.assertEqual(employee_names, {employee})
-		self.assertEqual(project_names, {project_a})
+
+	def test_employee_role_only_sees_self_in_project_employees(self):
+		employee = ensure_user(EMPLOYEE_USER, "Tracker Employee", ["Projects User"])
+		other = ensure_user(OTHER_EMPLOYEE_USER, "Tracker Other", ["Projects User"])
+		project_a = ensure_project("TT Roster Project A - self test")
+
+		make_task("TT Roster Own", project=project_a, assignee=employee)
+		make_task("TT Roster Other In Same Project", project=project_a, assignee=other)
+
+		frappe.set_user(employee)
+		try:
+			data = get_tracker_data(project=project_a)
+		finally:
+			frappe.set_user("Administrator")
+
+		employee_names = {e["name"] for e in data["employees"]}
+		self.assertEqual(employee_names, {employee})
 
 
 class TestTaskTrackerWorkspaceShortcut(IntegrationTestCase):
