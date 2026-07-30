@@ -1,0 +1,98 @@
+{
+ "app": "sigzenjira",
+ "creation": "2026-07-30 12:45:23.845893",
+ "docstatus": 0,
+ "doctype": "Workspace Sidebar",
+ "idx": 0,
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "wallpaper",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Project Management",
+   "link_to": "Project Management",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "list",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Additional Hours Request",
+   "link_to": "Additional Hours Request",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "list",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Task Template",
+   "link_to": "Task Template",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "list",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Reports",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Section Break"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "table",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Pending Extra Hours Count",
+   "link_to": "Pending Extra Hours Count",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "icon": "table",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Extra Hours Approved Sum",
+   "link_to": "Extra Hours Approved Sum",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "panel-top",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Task Tracker",
+   "link_to": "task-tracker",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-07-30 12:45:23.845893",
+ "modified_by": "Administrator",
+ "name": "Sigzenjira",
+ "owner": "Administrator",
+ "standard": 1,
+ "title": "Sigzenjira"
+}
