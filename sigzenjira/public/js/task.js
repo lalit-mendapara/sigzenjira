@@ -23,6 +23,78 @@ const CHILD_WORK_ITEM_TYPE = {
 // (validate_employee_story_field_restriction); it isn't the real boundary.
 const EMPLOYEE_STORY_EDITABLE_FIELDS = new Set(["custom_task_template"]);
 
+// Mirrors the Task Status Select options (erpnext task.json) - Overdue/
+// Template/Cancelled are intentionally left unstyled, only the 4 the user
+// asked for get a colour.
+const TASK_SPLIT_STATUS_CLASS = {
+	Open: "task-split-status-open",
+	Working: "task-split-status-progress",
+	"Pending Review": "task-split-status-review",
+	Completed: "task-split-status-done",
+};
+
+function inject_task_split_status_css() {
+	if (document.getElementById("task-split-status-style")) {
+		return;
+	}
+	$(`<style id="task-split-status-style">
+		.task-split-status-open { background-color: rgba(150, 150, 150, 0.25) !important; }
+		.task-split-status-progress { background-color: rgba(0, 123, 255, 0.2) !important; }
+		.task-split-status-review { background-color: rgba(255, 193, 7, 0.25) !important; }
+		.task-split-status-done { background-color: rgba(40, 167, 69, 0.2) !important; }
+		.task-split-linkable .static-area { cursor: pointer; text-decoration: underline; }
+	</style>`).appendTo("head");
+}
+
+// Colours the Task Item cell by the generated Task's status, and makes it
+// open that Task's form on click instead of the grid's default click-to-edit
+// (task_item is already read_only once generated_task is set, via
+// read_only_depends_on on the Task Split doctype - editing it inline was
+// never useful for a generated row anyway).
+function style_task_split_row(grid_row, status_map) {
+	const column = grid_row.columns && grid_row.columns.task_item;
+	if (!column) {
+		return;
+	}
+	const row = grid_row.doc;
+
+	Object.values(TASK_SPLIT_STATUS_CLASS).forEach((cls) => column.removeClass(cls));
+	const status_class = TASK_SPLIT_STATUS_CLASS[status_map[row.generated_task]];
+	if (status_class) {
+		column.addClass(status_class);
+	}
+
+	column.toggleClass("task-split-linkable", Boolean(row.generated_task));
+	if (row.generated_task) {
+		column.off("click").on("click", function (e) {
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			frappe.set_route("Form", "Task", row.generated_task);
+		});
+	}
+}
+
+function refresh_task_split_status_colors(frm) {
+	if (frm.doc.custom_work_item_type !== "Story") {
+		return;
+	}
+	const grid = frm.fields_dict.custom_task_split && frm.fields_dict.custom_task_split.grid;
+	if (!grid) {
+		return;
+	}
+
+	const generated_tasks = (frm.doc.custom_task_split || []).map((row) => row.generated_task).filter(Boolean);
+	if (!generated_tasks.length) {
+		return;
+	}
+
+	frappe.db.get_list("Task", { filters: { name: ["in", generated_tasks] }, fields: ["name", "status"], limit: 0 }).then((tasks) => {
+		frm.__task_split_status_map = {};
+		tasks.forEach((task) => (frm.__task_split_status_map[task.name] = task.status));
+		grid.grid_rows.forEach((grid_row) => style_task_split_row(grid_row, frm.__task_split_status_map));
+	});
+}
+
 function lock_task_split_columns(frm) {
 	if (frm.is_new() || frm.doc.custom_work_item_type !== "Story") {
 		return;
@@ -60,6 +132,19 @@ function lock_story_to_template_only(frm) {
 
 frappe.ui.form.on("Task", {
 	onload: function (frm) {
+		inject_task_split_status_css();
+
+		// grid-row-render fires per-row on every grid render/refresh (initial
+		// load, add row, frm.reload_doc after "Create Task", etc.) - bind once
+		// here rather than re-binding inside refresh.
+		$(frm.wrapper)
+			.off("grid-row-render.task_split_status")
+			.on("grid-row-render.task_split_status", function (e, grid_row) {
+				if (grid_row.grid && grid_row.grid.df && grid_row.grid.df.fieldname === "custom_task_split") {
+					style_task_split_row(grid_row, frm.__task_split_status_map || {});
+				}
+			});
+
 		// Only narrow the dropdown on a NEW doc - narrowing it on an
 		// EXISTING Epic/Story/Task would drop "Epic"/"Story"/"Task" from
 		// the options list entirely, and a Select field can't render a
@@ -99,6 +184,7 @@ frappe.ui.form.on("Task", {
 	refresh: function (frm) {
 		lock_story_to_template_only(frm);
 		lock_task_split_columns(frm);
+		refresh_task_split_status_colors(frm);
 
 		// Only on an already-saved item - a not-yet-created Epic has no
 		// name yet to link a new child's parent_task to.
@@ -170,9 +256,33 @@ frappe.ui.form.on("Task", {
 // the parent's - this file already loads on every Task/Story form via the
 // doctype_js hook, so registering the child doctype's events here works.
 frappe.ui.form.on("Task Split", {
+	create_action: function (frm, cdt, cdn) {
+		if (frm.__task_split_perms && !frm.__task_split_perms.allocate_hours) {
+			frappe.msgprint(__("Only a user with Allocate Hours access on this Project can create a Task from this row."));
+			return;
+		}
+
+		const row = locals[cdt][cdn];
+		if (!row.task_item) {
+			frappe.msgprint(__("Fill in Task Item before creating a Task from this row."));
+			return;
+		}
+
+		frappe.confirm(__("Create a Task for {0} without an Expected Hours budget?", [row.task_item]), function () {
+			frappe.call({
+				method: "sigzenjira.custom.task.create_task_without_hours",
+				args: { row_name: row.name },
+				freeze: true,
+				callback: function () {
+					frm.reload_doc();
+				},
+			});
+		});
+	},
+
 	assign_action: function (frm, cdt, cdn) {
 		if (frm.__task_split_perms && !frm.__task_split_perms.assign_users) {
-			frappe.msgprint(__("Only a user with Assign Users access on this Project can assign users on the Task Split table."));
+			frappe.msgprint(__("You dont have permission to assign users from task-split "));
 			return;
 		}
 

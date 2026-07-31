@@ -1,6 +1,29 @@
 import json
 
 import frappe
+from frappe import _
+
+from sigzenjira.custom.project_user import user_has_project_flag
+
+
+def validate_task_assign_permission(doc, method):
+	# Same custom_assign_users gate as validate_task_split_assign_permission /
+	# set_split_row_assignees (custom/task.py) - without this, a user without
+	# Assign Users access could just bypass the Task Split grid's assign
+	# dialog and assign from the generated Task's own "Assigned To" sidebar.
+	# Scoped to split-generated Tasks only - plain Tasks/Sub-tasks that never
+	# went through a split aren't part of that budget-adjacent commitment and
+	# keep normal assignment behaviour.
+	if doc.reference_type != "Task":
+		return
+
+	story_name = frappe.db.get_value("Task Split", {"generated_task": doc.reference_name}, "parent")
+	if not story_name:
+		return
+
+	project = frappe.db.get_value("Task", story_name, "project")
+	if not user_has_project_flag(project, "custom_assign_users"):
+		frappe.throw(_("You dont have permission to assign users on Tasks for this Project."))
 
 
 def sync_todo_assignment_to_split_row(doc, method):

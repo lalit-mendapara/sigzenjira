@@ -59,6 +59,14 @@ def recompute_actual_time(task_name):
 		update_modified=False,
 	)
 
+	# Mirrors sync_expected_hours_to_split_row (custom/task.py) but for actual
+	# hours: this task_name may be a generated Task Split row's Task, and this
+	# function is only ever reached via frappe.db.set_value, which doesn't
+	# trigger Task's on_update doc_events - so the split row needs its own push.
+	split_row = frappe.db.get_value("Task Split", {"generated_task": task_name}, "name")
+	if split_row:
+		frappe.db.set_value("Task Split", split_row, "actual_hours", actual_time, update_modified=False)
+
 	parent_task = frappe.db.get_value("Task", task_name, "parent_task")
 	if parent_task:
 		recompute_actual_time(parent_task)
@@ -124,6 +132,12 @@ def check_over_budget(timesheet_name):
 		# without this, the warning would keep firing on every timesheet even
 		# after the extra hours were already granted for exactly this reason.
 		effective_budget = flt(expected_time) + flt(extra_hours)
+		if not effective_budget:
+			# expected_time 0 means no budget declared yet (e.g. a Task created
+			# via the Task Split "Create Task" escape hatch before hours are
+			# known - see create_task_without_hours), not a 0h budget already
+			# exhausted. Same convention as validate_hour_budget's parent_budget check.
+			continue
 		projected = flt(current_actual) + new_hours
 		if projected > effective_budget:
 			warnings.append(

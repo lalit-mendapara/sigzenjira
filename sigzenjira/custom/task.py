@@ -179,7 +179,7 @@ def validate_task_split_assign_permission(doc, method):
 
 	for row in doc.get("custom_task_split") or []:
 		if row.pending_assign_users != before_rows.get(row.name):
-			frappe.throw(_("Only a user with Assign Users access on this Project can assign users on the Task Split table."))
+			frappe.throw(_("You can only stage assignees on the Task Split table if you have Assign Users access on this Project."))
 
 
 def validate_one_story_per_issue(doc, method):
@@ -428,7 +428,7 @@ def set_split_row_assignees(row_name, users):
 	story_name = frappe.db.get_value("Task Split", row_name, "parent")
 	project = frappe.db.get_value("Task", story_name, "project")
 	if not user_has_project_flag(project, "custom_assign_users"):
-		frappe.throw(_("Only a user with Assign Users access on this Project can assign users on the Task Split table."))
+		frappe.throw(_("You dont have permission to assign users from task-split "))
 
 	raw_assign = frappe.db.get_value("Task", generated_task, "_assign")
 	current_users = set(json.loads(raw_assign) if raw_assign else [])
@@ -438,6 +438,52 @@ def set_split_row_assignees(row_name, users):
 
 	for user in current_users - users:
 		assign_to.remove("Task", generated_task, user)
+
+
+@frappe.whitelist()
+def create_task_without_hours(row_name):
+	# generate_tasks_from_split only turns a row into a real Task once
+	# expected_hours is filled in - this is the escape hatch for a PM who
+	# wants the Task to exist (so it can be assigned/worked on) before the
+	# hour budget for it is known yet.
+	row = frappe.db.get_value(
+		"Task Split",
+		row_name,
+		["parent", "task_item", "description", "ecd", "generated_task", "is_generating", "pending_assign_users"],
+		as_dict=True,
+	)
+	if not row:
+		frappe.throw(_("Task Split row not found."))
+	if row.generated_task or row.is_generating:
+		frappe.throw(_("This row has already generated a Task."))
+
+	story = frappe.get_doc("Task", row.parent)
+	if not user_has_project_flag(story.project, "custom_allocate_hours"):
+		frappe.throw(_("Only a user with Allocate Hours access on this Project can create a Task from this row."))
+
+	frappe.db.set_value("Task Split", row_name, "is_generating", 1)
+
+	task = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"subject": f"{row.task_item} - {story.subject}",
+			"project": story.project,
+			"parent_task": story.name,
+			"description": row.description,
+			"custom_work_item_type": "Task",
+			"priority": story.priority,
+			"exp_end_date": row.ecd,
+		}
+	).insert()
+
+	frappe.db.set_value("Task Split", row_name, "generated_task", task.name)
+
+	for user in json.loads(row.pending_assign_users) if row.pending_assign_users else []:
+		assign_to.add({"assign_to": [user], "doctype": "Task", "name": task.name})
+	if row.pending_assign_users:
+		frappe.db.set_value("Task Split", row_name, "pending_assign_users", None)
+
+	return task.name
 
 
 def cleanup_task_references_on_delete(doc, method):

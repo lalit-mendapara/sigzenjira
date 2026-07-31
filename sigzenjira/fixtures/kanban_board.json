@@ -4,7 +4,7 @@
    {
     "column_name": "Open",
     "indicator": "Gray",
-    "order": "[\"T26-00045\", \"S26-00018\"]",
+    "order": "[]",
     "status": "Active"
    },
    {
@@ -50,47 +50,7 @@
   "fields": "[\n \"custom_work_item_type\",\n \"project\",\n \"exp_end_date\",\n \"expected_time\",\n \"actual_time\"\n]",
   "filters": "[]",
   "kanban_board_name": "Task Status Board",
-  "modified": "2026-07-29 12:33:14.566384",
   "name": "Task Status Board",
-  "private": 0,
-  "reference_doctype": "Task",
-  "show_labels": 1
- },
- {
-  "columns": [
-   {
-    "column_name": "Epic",
-    "indicator": "Gray",
-    "order": "[]",
-    "status": "Active"
-   },
-   {
-    "column_name": "Story",
-    "indicator": "Gray",
-    "order": "[\"S26-00018\"]",
-    "status": "Active"
-   },
-   {
-    "column_name": "Task",
-    "indicator": "Gray",
-    "order": "[\"T26-00045\"]",
-    "status": "Active"
-   },
-   {
-    "column_name": "Sub-task",
-    "indicator": "Gray",
-    "order": "[]",
-    "status": "Active"
-   }
-  ],
-  "docstatus": 0,
-  "doctype": "Kanban Board",
-  "field_name": "custom_work_item_type",
-  "fields": "[\n \"status\",\n \"project\",\n \"exp_end_date\",\n \"expected_time\",\n \"actual_time\"\n]",
-  "filters": "[]",
-  "kanban_board_name": "Work Item Hierarchy Board",
-  "modified": "2026-07-29 12:33:14.567655",
-  "name": "Work Item Hierarchy Board",
   "private": 0,
   "reference_doctype": "Task",
   "show_labels": 1
@@ -104,43 +64,37 @@
     "status": "Active"
    },
    {
-    "column_name": "Working",
+    "column_name": "WIP",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
    },
    {
-    "column_name": "Pending Review",
+    "column_name": "IN-QA",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
    },
    {
-    "column_name": "Overdue",
+    "column_name": "IN-UAT",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
    },
    {
-    "column_name": "Template",
+    "column_name": "Resolved",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
    },
    {
-    "column_name": "Completed",
+    "column_name": "On Hold",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
    },
    {
-    "column_name": "Cancelled",
-    "indicator": "Gray",
-    "order": "[]",
-    "status": "Active"
-   },
-   {
-    "column_name": "Blocked",
+    "column_name": "Closed",
     "indicator": "Gray",
     "order": "[]",
     "status": "Active"
@@ -149,13 +103,12 @@
   "docstatus": 0,
   "doctype": "Kanban Board",
   "field_name": "status",
-  "fields": null,
-  "filters": "[[\"Task\",\"project\",\"=\",\"PROJ-0001\"]]",
-  "kanban_board_name": "FlipCab ERP",
-  "modified": "2026-07-29 12:23:34.167520",
-  "name": "FlipCab ERP",
+  "fields": "[\n \"priority\",\n \"issue_type\",\n \"opening_date\"\n]",
+  "filters": "[]",
+  "kanban_board_name": "Issue Status Board",
+  "name": "Issue Status Board",
   "private": 0,
-  "reference_doctype": "Task",
-  "show_labels": 0
+  "reference_doctype": "Issue",
+  "show_labels": 1
  }
 ]

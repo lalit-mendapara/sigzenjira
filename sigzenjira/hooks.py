@@ -68,7 +68,7 @@ fixtures = [
 		],
 	},
 	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
-	{"doctype": "Kanban Board", "filters": [["reference_doctype", "=", "Task"]]},
+	{"doctype": "Kanban Board", "filters": [["kanban_board_name", "in", ["Task Status Board", "Issue Status Board"]]]},
 	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template", "Kanban Board"]]]},
 ]
 
@@ -232,6 +232,7 @@ doc_events = {
 		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
 	},
 	"ToDo": {
+		"before_insert": "sigzenjira.custom.todo.validate_task_assign_permission",
 		"after_insert": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
 		"on_update": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
 		"on_trash": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
