@@ -11,6 +11,7 @@ from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get
 def after_install():
 	create_custom_fields(get_custom_fields(), update=True)
 	set_task_search_fields()
+	set_task_costing_permlevel()
 	set_task_status_options()
 	set_issue_status_options()
 	create_task_projects_manager_docperm()
@@ -29,6 +30,19 @@ def set_task_search_fields():
 	# frappe/desk/search.py). This makes the parent_task picker show the
 	# work item type next to every Task without adding any field.
 	make_property_setter("Task", None, "search_fields", "subject,custom_work_item_type", "Data", for_doctype=True)
+
+
+COSTING_PERMLEVEL_FIELDS = ("total_costing_amount", "total_billing_amount")
+
+
+def set_task_costing_permlevel():
+	# Money a task cost / can be billed is manager information. Pushing both
+	# fields to permlevel 1 hides them from every role that lacks a permlevel-1
+	# read, which is only Projects Manager (see create_task_projects_manager_docperm).
+	# work_board.py drops permlevel > 0 fields from its card payload for the same
+	# reason - the board bypasses the form's permlevel handling.
+	for fieldname in COSTING_PERMLEVEL_FIELDS:
+		make_property_setter("Task", fieldname, "permlevel", 1, "Int")
 
 
 TASK_STATUS_OPTIONS = "Open\nWorking\nPending Review\nOverdue\nCompleted\nCancelled\nBlocked"
