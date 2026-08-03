@@ -6,8 +6,8 @@ app_email = "lalit@gmail.com"
 app_license = "mit"
 
 fixtures = [
-	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User"]]]},
-	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue"]]]},
+	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User", "Project", "Issue"]]]},
+	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue", "Timesheet Detail"]]]},
 	{
 		"doctype": "Report",
 		"filters": [
@@ -362,4 +362,3 @@ doc_events = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

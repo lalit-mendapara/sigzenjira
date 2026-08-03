@@ -5,11 +5,25 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 from sigzenjira.custom.custom_fields import get_custom_fields
-from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get_dashboard_charts, get_dashboard, get_workspace_shortcut
+from sigzenjira.custom.dashboard import (
+	get_dashboard,
+	get_dashboard_charts,
+	get_number_cards,
+	get_query_reports,
+	get_workspace_shortcut,
+)
+
+
+def sync_custom_fields():
+	# Every Custom Field this app owns, (re-)created from the single declarative
+	# source. Split out of after_install so a field added later can be pushed to
+	# an existing site with `bench --site <site> execute
+	# sigzenjira.install.sync_custom_fields` before exporting fixtures.
+	create_custom_fields(get_custom_fields(), update=True)
 
 
 def after_install():
-	create_custom_fields(get_custom_fields(), update=True)
+	sync_custom_fields()
 	set_task_search_fields()
 	set_task_costing_permlevel()
 	set_task_status_options()
@@ -29,7 +43,9 @@ def set_task_search_fields():
 	# text under each match in a Link field's search dropdown (see
 	# frappe/desk/search.py). This makes the parent_task picker show the
 	# work item type next to every Task without adding any field.
-	make_property_setter("Task", None, "search_fields", "subject,custom_work_item_type", "Data", for_doctype=True)
+	make_property_setter(
+		"Task", None, "search_fields", "subject,custom_work_item_type", "Data", for_doctype=True
+	)
 
 
 COSTING_PERMLEVEL_FIELDS = ("total_costing_amount", "total_billing_amount")
@@ -87,7 +103,9 @@ def create_task_projects_manager_docperm():
 	# from every role core already grants it to (Projects User, HR User, HR
 	# Manager). Mirror those into Custom DocPerm first so nothing regresses.
 	for perm in frappe.get_all("DocPerm", filters={"parent": "Task"}, fields=["role", *PERM_FLAG_FIELDS]):
-		if frappe.db.exists("Custom DocPerm", {"parent": "Task", "role": perm.role, "permlevel": perm.permlevel}):
+		if frappe.db.exists(
+			"Custom DocPerm", {"parent": "Task", "role": perm.role, "permlevel": perm.permlevel}
+		):
 			continue
 		frappe.get_doc(
 			{
@@ -126,8 +144,12 @@ def create_task_template_director_po_docperm():
 	# they can't create a Task Template or even select one in a Story's
 	# Task Template picker. Same Custom DocPerm gotcha as
 	# create_task_projects_manager_docperm above: mirror existing rows first.
-	for perm in frappe.get_all("DocPerm", filters={"parent": "Task Template"}, fields=["role", *PERM_FLAG_FIELDS]):
-		if frappe.db.exists("Custom DocPerm", {"parent": "Task Template", "role": perm.role, "permlevel": perm.permlevel}):
+	for perm in frappe.get_all(
+		"DocPerm", filters={"parent": "Task Template"}, fields=["role", *PERM_FLAG_FIELDS]
+	):
+		if frappe.db.exists(
+			"Custom DocPerm", {"parent": "Task Template", "role": perm.role, "permlevel": perm.permlevel}
+		):
 			continue
 		frappe.get_doc(
 			{
@@ -292,15 +314,19 @@ def add_pm_dashboard_workspace_shortcut():
 	# pre-existing workspace state.
 	shortcut = get_workspace_shortcut()
 	# Check if shortcut already exists
-	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+	if not frappe.db.exists(
+		"Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}
+	):
 		# Insert shortcut row as a child document
 		doc = frappe.new_doc("Workspace Shortcut")
-		doc.update({
-			"parent": "Project Management",
-			"parenttype": "Workspace",
-			"parentfield": "shortcuts",
-			**shortcut,
-		})
+		doc.update(
+			{
+				"parent": "Project Management",
+				"parenttype": "Workspace",
+				"parentfield": "shortcuts",
+				**shortcut,
+			}
+		)
 		doc.insert(ignore_permissions=True)
 
 	# The shortcuts child table alone doesn't render anything — Frappe's workspace
@@ -339,7 +365,9 @@ def add_work_board_workspace_shortcut():
 	# above: the child row and the `content` block are written directly, never
 	# through ws.save().
 	shortcut = get_work_board_workspace_shortcut()
-	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+	if not frappe.db.exists(
+		"Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}
+	):
 		doc = frappe.new_doc("Workspace Shortcut")
 		doc.update(
 			{

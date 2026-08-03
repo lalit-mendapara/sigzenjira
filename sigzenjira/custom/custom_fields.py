@@ -23,6 +23,26 @@ def get_custom_fields():
 				"description": "Gets notified of, and can approve/reject, Additional Hours Requests under this Project.",
 			},
 		],
+		"Project": [
+			{
+				"fieldname": "custom_is_billable",
+				"label": "Billable",
+				"fieldtype": "Check",
+				"insert_after": "is_active",
+				"default": "0",
+				"description": "Work under this Project can be billed to the customer. Nothing below a non-billable Project may be billable.",
+			},
+		],
+		"Issue": [
+			{
+				"fieldname": "custom_is_billable",
+				"label": "Billable",
+				"fieldtype": "Check",
+				"insert_after": "project",
+				"default": "0",
+				"description": "Work done for this Issue can be billed. Defaults from the Project; uncheck for free support.",
+			},
+		],
 		"Task": [
 			{
 				"fieldname": "custom_work_item_type",
@@ -35,6 +55,14 @@ def get_custom_fields():
 				# the type, and reparenting deliberately never renames, so a type
 				# change would leave the name lying about the hierarchy.
 				"set_only_once": 1,
+			},
+			{
+				"fieldname": "custom_is_billable",
+				"label": "Billable",
+				"fieldtype": "Check",
+				"insert_after": "custom_work_item_type",
+				"default": "0",
+				"description": "Time logged against this item is billable. Cannot be checked unless every parent it declares is billable.",
 			},
 			{
 				"fieldname": "custom_extra_hours",
@@ -84,5 +112,5 @@ def get_custom_fields():
 				"insert_after": "custom_task_template",
 				"cannot_add_rows": 0,
 			},
-		]
+		],
 	}
