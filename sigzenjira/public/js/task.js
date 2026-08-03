@@ -6,7 +6,12 @@
 // options they can't use); the actual restriction is enforced server-side
 // in validate_work_item_type_permission since a client-side check alone
 // isn't real permission enforcement.
-const WORK_ITEM_TYPE_PRIVILEGED_ROLES = ["Director", "Product Owner", "Projects Manager", "System Manager"];
+const WORK_ITEM_TYPE_PRIVILEGED_ROLES = [
+	"Director",
+	"Product Owner",
+	"Projects Manager",
+	"System Manager",
+];
 
 // Nearest child level for each Work Item Type - null means no lower level
 // exists (Sub-task is the bottom of the tree). Mirrors EXPECTED_PARENT_TYPE
@@ -83,16 +88,26 @@ function refresh_task_split_status_colors(frm) {
 		return;
 	}
 
-	const generated_tasks = (frm.doc.custom_task_split || []).map((row) => row.generated_task).filter(Boolean);
+	const generated_tasks = (frm.doc.custom_task_split || [])
+		.map((row) => row.generated_task)
+		.filter(Boolean);
 	if (!generated_tasks.length) {
 		return;
 	}
 
-	frappe.db.get_list("Task", { filters: { name: ["in", generated_tasks] }, fields: ["name", "status"], limit: 0 }).then((tasks) => {
-		frm.__task_split_status_map = {};
-		tasks.forEach((task) => (frm.__task_split_status_map[task.name] = task.status));
-		grid.grid_rows.forEach((grid_row) => style_task_split_row(grid_row, frm.__task_split_status_map));
-	});
+	frappe.db
+		.get_list("Task", {
+			filters: { name: ["in", generated_tasks] },
+			fields: ["name", "status"],
+			limit: 0,
+		})
+		.then((tasks) => {
+			frm.__task_split_status_map = {};
+			tasks.forEach((task) => (frm.__task_split_status_map[task.name] = task.status));
+			grid.grid_rows.forEach((grid_row) =>
+				style_task_split_row(grid_row, frm.__task_split_status_map)
+			);
+		});
 }
 
 function lock_task_split_columns(frm) {
@@ -148,7 +163,9 @@ function apply_task_template(frm) {
 			// "Empty" means no row has real content yet - a blank row from
 			// clicking "Add Row" counts as empty, so a first apply clears it
 			// out rather than leaving a row that fails task_item's reqd.
-			const existing = new Set((frm.doc.custom_task_split || []).map((row) => row.task_item).filter(Boolean));
+			const existing = new Set(
+				(frm.doc.custom_task_split || []).map((row) => row.task_item).filter(Boolean)
+			);
 			if (!existing.size) {
 				frm.clear_table("custom_task_split");
 			}
@@ -168,13 +185,57 @@ function apply_task_template(frm) {
 			frappe.show_alert(
 				added
 					? __("Added {0} row(s) from {1}.", [added, frm.doc.custom_task_template])
-					: __("Task Split already has every item from {0}.", [frm.doc.custom_task_template])
+					: __("Task Split already has every item from {0}.", [
+							frm.doc.custom_task_template,
+					  ])
 			);
 		},
 	});
 }
 
+// Mirrors issue.js. A Task's default comes from its parent_task if it has one,
+// otherwise its project - the same precedence the server's PARENT_SOURCES uses,
+// except the server checks ALL sources while this only needs a starting value.
+function seed_billable_from_source(frm) {
+	const source = frm.doc.parent_task
+		? { doctype: "Task", name: frm.doc.parent_task }
+		: frm.doc.project
+		? { doctype: "Project", name: frm.doc.project }
+		: null;
+
+	if (!source) {
+		return;
+	}
+
+	frappe.db.get_value(source.doctype, source.name, "custom_is_billable").then((r) => {
+		frm.set_value("custom_is_billable", cint(r.message && r.message.custom_is_billable));
+	});
+}
+
 frappe.ui.form.on("Task", {
+	onload_post_render(frm) {
+		if (frm.is_new()) {
+			seed_billable_from_source(frm);
+		}
+	},
+
+	parent_task(frm) {
+		seed_billable_from_source(frm);
+	},
+
+	project(frm) {
+		seed_billable_from_source(frm);
+	},
+
+	// A new Task Split row starts wherever the Story is - the server clamp
+	// then makes a billable row under a non-billable Story impossible anyway.
+	// This lives on the Task handler object (not Task Split's) because grid
+	// row-add events fire on the parent form's script_manager, not the child
+	// doctype's - see Grid.add_new_row in frappe's grid.js.
+	custom_task_split_add: function (frm, cdt, cdn) {
+		frappe.model.set_value(cdt, cdn, "is_billable", cint(frm.doc.custom_is_billable));
+	},
+
 	onload: function (frm) {
 		inject_task_split_status_css();
 
@@ -184,7 +245,11 @@ frappe.ui.form.on("Task", {
 		$(frm.wrapper)
 			.off("grid-row-render.task_split_status")
 			.on("grid-row-render.task_split_status", function (e, grid_row) {
-				if (grid_row.grid && grid_row.grid.df && grid_row.grid.df.fieldname === "custom_task_split") {
+				if (
+					grid_row.grid &&
+					grid_row.grid.df &&
+					grid_row.grid.df.fieldname === "custom_task_split"
+				) {
 					style_task_split_row(grid_row, frm.__task_split_status_map || {});
 				}
 			});
@@ -196,7 +261,10 @@ frappe.ui.form.on("Task", {
 		// blank/unreadable to a non-privileged role even though the real
 		// value is intact in the DB. Everyone can always READ the current
 		// classification; only who can SET it to something new is restricted.
-		if (frm.is_new() && !WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role))) {
+		if (
+			frm.is_new() &&
+			!WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role))
+		) {
 			frm.set_df_property("custom_work_item_type", "options", "Sub-task");
 			if (!frm.doc.custom_work_item_type) {
 				frm.set_value("custom_work_item_type", "Sub-task");
@@ -261,7 +329,8 @@ frappe.ui.form.on("Task", {
 		// custom/task.py); Epic/Story/Task classification is role-gated - only
 		// show the button if this user could actually save that type.
 		const can_create_child_type =
-			child_type === "Sub-task" || WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role));
+			child_type === "Sub-task" ||
+			WORK_ITEM_TYPE_PRIVILEGED_ROLES.some((role) => frappe.user_roles.includes(role));
 
 		if (!can_create_child_type || !frappe.model.can_create("Task")) {
 			return;
@@ -287,7 +356,11 @@ frappe.ui.form.on("Task", {
 frappe.ui.form.on("Task Split", {
 	create_action: function (frm, cdt, cdn) {
 		if (frm.__task_split_perms && !frm.__task_split_perms.allocate_hours) {
-			frappe.msgprint(__("Only a user with Allocate Hours access on this Project can create a Task from this row."));
+			frappe.msgprint(
+				__(
+					"Only a user with Allocate Hours access on this Project can create a Task from this row."
+				)
+			);
 			return;
 		}
 
@@ -306,12 +379,17 @@ frappe.ui.form.on("Task Split", {
 
 		frappe.confirm(
 			needs_save
-				? __("Save this Story and create a Task for {0} without an Expected Hours budget?", [row.task_item])
+				? __(
+						"Save this Story and create a Task for {0} without an Expected Hours budget?",
+						[row.task_item]
+				  )
 				: __("Create a Task for {0} without an Expected Hours budget?", [row.task_item]),
 			function () {
 				const ready = needs_save ? frm.save() : Promise.resolve();
 				ready.then(function () {
-					const saved_row = needs_save ? (frm.doc.custom_task_split || [])[row.idx - 1] : row;
+					const saved_row = needs_save
+						? (frm.doc.custom_task_split || [])[row.idx - 1]
+						: row;
 					// Saving with expected_hours filled already generates the
 					// Task via generate_tasks_from_split - nothing left to do.
 					if (!saved_row || saved_row.generated_task) {
@@ -370,7 +448,12 @@ frappe.ui.form.on("Task Split", {
 					// to sync yet - fill it in here too, purely so the pick shows
 					// up immediately instead of looking like it did nothing.
 					const users = values.users || [];
-					frappe.model.set_value(cdt, cdn, "pending_assign_users", JSON.stringify(users));
+					frappe.model.set_value(
+						cdt,
+						cdn,
+						"pending_assign_users",
+						JSON.stringify(users)
+					);
 					frappe.model.set_value(
 						cdt,
 						cdn,
