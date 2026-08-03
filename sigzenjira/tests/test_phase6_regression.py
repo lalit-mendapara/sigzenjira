@@ -70,8 +70,13 @@ class TestPhase6Regression(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			make_task("PH6 Story-3", "Story", epic.name, expected_time=1)
 
-		with self.assertRaises(frappe.ValidationError):
-			make_task("PH6 S2-T4", "Task", story2.name, expected_time=1)
+		# The Task-vs-Story overflow-by-addition case that used to sit here is
+		# unreachable now: a Task can only reach a Story through its Task Split
+		# grid (block_manual_task_under_story), and rollup_story_expected_time
+		# folds each new row's hours straight into the Story's own budget, so
+		# adding one can never exceed it. Converting the call only moved the
+		# throw onto the Story-vs-Epic axis, which line 70-71 already covers.
+		# The Task-vs-Story budget is still exercised below, on the edit path.
 
 		# editing an existing Task's expected_time upward past budget is blocked too
 		t1.reload()
