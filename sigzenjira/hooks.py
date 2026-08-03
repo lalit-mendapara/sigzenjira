@@ -228,6 +228,7 @@ doc_events = {
 			"sigzenjira.custom.task.validate_hour_budget",
 			"sigzenjira.custom.task.validate_expected_time_edit_permission",
 			"sigzenjira.custom.task.sync_actual_extra_hours",
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_task_split_billable",
 			"sigzenjira.custom.billable.validate_no_billable_dependants",
@@ -245,12 +246,14 @@ doc_events = {
 	},
 	"Project": {
 		"validate": [
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 	},
 	"Issue": {
 		"validate": [
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],

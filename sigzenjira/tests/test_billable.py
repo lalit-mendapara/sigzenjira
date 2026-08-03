@@ -193,3 +193,86 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 		story.save()
 
 		self.assertEqual(frappe.db.get_value("Task", story.name, "custom_is_billable"), 0)
+
+
+BILLABLE_EMPLOYEE_USER = "test_billable_employee@example.com"
+
+
+def ensure_billable_employee_user():
+	if not frappe.db.exists("User", BILLABLE_EMPLOYEE_USER):
+		frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": BILLABLE_EMPLOYEE_USER,
+				"first_name": "Billable Employee",
+				"send_welcome_email": 0,
+				"roles": [{"role": "Employee"}, {"role": "Projects User"}],
+			}
+		).insert(ignore_permissions=True)
+	return BILLABLE_EMPLOYEE_USER
+
+
+class TestBillablePermission(IntegrationTestCase):
+	def test_non_privileged_user_cannot_change_billable(self):
+		user = ensure_billable_employee_user()
+		# Parent is billable so the upward clamp cannot fire - the only thing
+		# left that can throw is the permission gate under test.
+		parent = make_task("BC Perm Parent", "Task", expected_time=10, is_billable=1)
+		task = make_task("BC Perm Sub", "Sub-task", parent.name, is_billable=0)
+
+		frappe.set_user(user)
+		try:
+			as_employee = frappe.get_doc("Task", task.name)
+			as_employee.custom_is_billable = 1
+			with self.assertRaises(frappe.ValidationError) as caught:
+				as_employee.save()
+			self.assertIn("change Billable", str(caught.exception))
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_non_privileged_user_can_save_unrelated_field_on_billable_task(self):
+		user = ensure_billable_employee_user()
+		parent = make_task("BC Perm Untouched Parent", "Task", expected_time=10, is_billable=1)
+		task = make_task("BC Perm Untouched Sub", "Sub-task", parent.name, is_billable=1)
+
+		frappe.set_user(user)
+		try:
+			as_employee = frappe.get_doc("Task", task.name)
+			as_employee.status = "Working"
+			as_employee.save()
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 1)
+
+	def test_privileged_role_can_change_billable(self):
+		parent = make_task("BC Perm Privileged Parent", "Task", expected_time=10, is_billable=1)
+		task = make_task("BC Perm Privileged Sub", "Sub-task", parent.name, is_billable=0)
+
+		task.custom_is_billable = 1
+		task.save()
+
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 1)
+
+	def test_non_privileged_user_cannot_change_split_row_billable(self):
+		user = ensure_billable_employee_user()
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Perm Split Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Perm item", "is_billable": 0})
+		story.insert()
+
+		frappe.set_user(user)
+		try:
+			as_employee = frappe.get_doc("Task", story.name)
+			as_employee.custom_task_split[0].is_billable = 1
+			with self.assertRaises(frappe.ValidationError) as caught:
+				as_employee.save()
+			self.assertIn("Task Split", str(caught.exception))
+		finally:
+			frappe.set_user("Administrator")

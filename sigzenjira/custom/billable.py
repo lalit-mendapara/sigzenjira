@@ -2,7 +2,44 @@ import frappe
 from frappe import _
 from frappe.utils import cint, get_link_to_form
 
+from sigzenjira.custom.task import WORK_ITEM_TYPE_PRIVILEGED_ROLES
+
 BILLABLE_FIELD = "custom_is_billable"
+
+# --- Permission gate: only privileged roles may change Billable ---
+
+
+def validate_billable_edit_permission(doc, method=None):
+	# Billable is a money decision. Compared against the previous saved value
+	# rather than blanket-blocked, so an Employee can still save unrelated edits
+	# (status, progress) on a billable item without tripping this.
+	if doc.flags.ignore_permissions or doc.flags.via_issue_mapping:
+		# Set by our own server-side propagation (generate_tasks_from_split
+		# inserts with ignore_permissions=True; make_story sets via_issue_mapping)
+		# - the value was copied from an already-validated parent, not chosen by
+		# whoever happened to trigger the save.
+		return
+
+	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
+		return
+
+	before = doc.get_doc_before_save()
+	previous = 0 if doc.is_new() else cint((before or {}).get(BILLABLE_FIELD))
+	if cint(doc.get(BILLABLE_FIELD)) != previous:
+		frappe.throw(_("Only a Director, Product Owner, or Projects Manager can change Billable."))
+
+	if doc.doctype != "Task" or doc.custom_work_item_type != "Story":
+		return
+
+	before_rows = {row.name: cint(row.is_billable) for row in (before.custom_task_split if before else [])}
+	for row in doc.get("custom_task_split") or []:
+		if cint(row.is_billable) != before_rows.get(row.name, 0):
+			frappe.throw(
+				_(
+					"Only a Director, Product Owner, or Projects Manager can change Billable on the Task Split table."
+				)
+			)
+
 
 # --- Upward clamp: billable only under billable ---
 
