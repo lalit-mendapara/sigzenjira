@@ -228,6 +228,8 @@ doc_events = {
 			"sigzenjira.custom.task.validate_hour_budget",
 			"sigzenjira.custom.task.validate_expected_time_edit_permission",
 			"sigzenjira.custom.task.sync_actual_extra_hours",
+			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+			"sigzenjira.custom.billable.validate_task_split_billable",
 		],
 		"on_update": [
 			"sigzenjira.custom.task.delete_tasks_for_removed_split_rows",
@@ -239,6 +241,16 @@ doc_events = {
 			"sigzenjira.custom.timesheet.rollup_actual_time_on_reparent",
 		],
 		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
+	},
+	"Project": {
+		"validate": [
+			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+		],
+	},
+	"Issue": {
+		"validate": [
+			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+		],
 	},
 	"ToDo": {
 		"before_insert": "sigzenjira.custom.todo.validate_task_assign_permission",
