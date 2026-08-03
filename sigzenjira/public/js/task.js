@@ -268,16 +268,37 @@ frappe.ui.form.on("Task Split", {
 			return;
 		}
 
-		frappe.confirm(__("Create a Task for {0} without an Expected Hours budget?", [row.task_item]), function () {
-			frappe.call({
-				method: "sigzenjira.custom.task.create_task_without_hours",
-				args: { row_name: row.name },
-				freeze: true,
-				callback: function () {
-					frm.reload_doc();
-				},
-			});
-		});
+		// The row only exists in the browser until the Story is saved -
+		// create_task_without_hours looks it up by name in the DB, so an
+		// unsaved Story (or a row just added to a saved one) would throw
+		// "Task Split row not found." Save first, then re-read the row: save
+		// replaces the client-side rows, so the real name comes from idx.
+		const needs_save = frm.is_new() || row.__islocal || frm.is_dirty();
+
+		frappe.confirm(
+			needs_save
+				? __("Save this Story and create a Task for {0} without an Expected Hours budget?", [row.task_item])
+				: __("Create a Task for {0} without an Expected Hours budget?", [row.task_item]),
+			function () {
+				const ready = needs_save ? frm.save() : Promise.resolve();
+				ready.then(function () {
+					const saved_row = needs_save ? (frm.doc.custom_task_split || [])[row.idx - 1] : row;
+					// Saving with expected_hours filled already generates the
+					// Task via generate_tasks_from_split - nothing left to do.
+					if (!saved_row || saved_row.generated_task) {
+						return;
+					}
+					frappe.call({
+						method: "sigzenjira.custom.task.create_task_without_hours",
+						args: { row_name: saved_row.name },
+						freeze: true,
+						callback: function () {
+							frm.reload_doc();
+						},
+					});
+				});
+			}
+		);
 	},
 
 	assign_action: function (frm, cdt, cdn) {

@@ -105,7 +105,12 @@ def get_permission_query_conditions(user=None):
 	)"""
 
 
-def has_permission(doc, user=None, permission_type=None):
+def has_permission(doc, ptype=None, user=None, **kwargs):
+	# The kwarg MUST be named `ptype`: frappe.call() matches hook arguments
+	# against the signature and drops anything that doesn't match (see
+	# has_controller_permissions in frappe/permissions.py), so the old
+	# `permission_type` parameter never received a value and the create
+	# branch below was dead code.
 	user = user or frappe.session.user
 	roles = frappe.get_roles(user)
 	if "Projects Manager" in roles or "System Manager" in roles:
@@ -113,7 +118,7 @@ def has_permission(doc, user=None, permission_type=None):
 	# A new, unsaved doc has no owner yet to check against — row-level
 	# scoping only makes sense once requested_by is actually set, so defer
 	# entirely to the role-level create permission here.
-	if permission_type == "create":
+	if ptype == "create":
 		return True
 	if doc.requested_by == user:
 		return True

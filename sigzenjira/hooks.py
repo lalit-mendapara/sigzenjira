@@ -68,8 +68,7 @@ fixtures = [
 		],
 	},
 	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
-	{"doctype": "Kanban Board", "filters": [["kanban_board_name", "in", ["Task Status Board", "Issue Status Board"]]]},
-	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template", "Kanban Board"]]]},
+	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template"]]]},
 ]
 
 # Apps
@@ -110,8 +109,12 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Task": "public/js/task.js", "Timesheet": "public/js/timesheet.js", "Issue": "public/js/issue.js"}
-doctype_list_js = {"Task": "public/js/task_list.js"}
+doctype_js = {
+	"Task": "public/js/task.js",
+	"Timesheet": "public/js/timesheet.js",
+	"Issue": "public/js/issue.js",
+	"Project": "public/js/project.js",
+}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
@@ -195,10 +198,14 @@ after_install = "sigzenjira.install.after_install"
 
 permission_query_conditions = {
 	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.get_permission_query_conditions",
+	"Task": "sigzenjira.custom.permissions.task_query_conditions",
+	"Project": "sigzenjira.custom.permissions.project_query_conditions",
 }
 
 has_permission = {
 	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.has_permission",
+	"Task": "sigzenjira.custom.permissions.task_has_permission",
+	"Project": "sigzenjira.custom.permissions.project_has_permission",
 }
 
 # Document Events

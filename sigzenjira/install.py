@@ -6,7 +6,6 @@ from frappe.custom.doctype.property_setter.property_setter import make_property_
 
 from sigzenjira.custom.custom_fields import get_custom_fields
 from sigzenjira.custom.dashboard import get_query_reports, get_number_cards, get_dashboard_charts, get_dashboard, get_workspace_shortcut
-from sigzenjira.custom.kanban import get_kanban_boards
 
 
 def after_install():
@@ -19,8 +18,7 @@ def after_install():
 	create_task_template_employee_docperm()
 	create_additional_hours_request_workflow()
 	create_pm_dashboard()
-	create_kanban_board_docperm()
-	create_pm_kanban_boards()
+	add_work_board_workspace_shortcut()
 	frappe.clear_cache(doctype="Task")
 	frappe.clear_cache(doctype="Issue")
 
@@ -314,83 +312,42 @@ def add_pm_dashboard_workspace_shortcut():
 		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
 
 
-def create_kanban_board_docperm():
-	# Core Kanban Board only grants read to Desk User / System Manager, and no
-	# sigzenjira role holds Desk User — so without this, nobody but System
-	# Manager can open any Kanban board. Same Custom DocPerm gotcha as
-	# create_task_projects_manager_docperm: mirror existing rows first.
-	for perm in frappe.get_all("DocPerm", filters={"parent": "Kanban Board"}, fields=["role", *PERM_FLAG_FIELDS]):
-		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": perm.role, "permlevel": perm.permlevel}):
-			continue
-		frappe.get_doc(
+def get_work_board_workspace_shortcut():
+	return {
+		"label": "Work Board",
+		"type": "Page",
+		"link_to": "work-board",
+	}
+
+
+def add_work_board_workspace_shortcut():
+	# Same LinkValidationError landmine as add_pm_dashboard_workspace_shortcut
+	# above: the child row and the `content` block are written directly, never
+	# through ws.save().
+	shortcut = get_work_board_workspace_shortcut()
+	if not frappe.db.exists("Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}):
+		doc = frappe.new_doc("Workspace Shortcut")
+		doc.update(
 			{
-				"doctype": "Custom DocPerm",
-				"parent": "Kanban Board",
-				"parenttype": "DocType",
-				"parentfield": "permissions",
-				**perm,
+				"parent": "Project Management",
+				"parenttype": "Workspace",
+				"parentfield": "shortcuts",
+				**shortcut,
 			}
-		).insert(ignore_permissions=True)
+		)
+		doc.insert(ignore_permissions=True)
 
-	for role in ("Employee", "Projects User"):
-		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": role}):
-			continue
-		frappe.get_doc(
+	content = json.loads(frappe.db.get_value("Workspace", "Project Management", "content") or "[]")
+	already_has_block = any(
+		block.get("type") == "shortcut" and block.get("data", {}).get("shortcut_name") == shortcut["label"]
+		for block in content
+	)
+	if not already_has_block:
+		content.append(
 			{
-				"doctype": "Custom DocPerm",
-				"parent": "Kanban Board",
-				"parenttype": "DocType",
-				"parentfield": "permissions",
-				"role": role,
-				"read": 1,
+				"id": "sigzenjiraWorkBoardShortcut",
+				"type": "shortcut",
+				"data": {"shortcut_name": shortcut["label"], "col": 4},
 			}
-		).insert(ignore_permissions=True)
-
-	for role in ("Director", "Product Owner", "Projects Manager"):
-		if frappe.db.exists("Custom DocPerm", {"parent": "Kanban Board", "role": role}):
-			continue
-		frappe.get_doc(
-			{
-				"doctype": "Custom DocPerm",
-				"parent": "Kanban Board",
-				"parenttype": "DocType",
-				"parentfield": "permissions",
-				"role": role,
-				"read": 1,
-				"write": 1,
-				"create": 1,
-				"delete": 0,
-				"report": 1,
-				"export": 1,
-			}
-		).insert(ignore_permissions=True)
-
-
-def create_pm_kanban_boards():
-	# `fields`/`show_labels` control which extra fields render on each card
-	# (frappe.desk.doctype.kanban_board.kanban_board.save_settings does the
-	# same doc.fields = json.dumps(...) assignment despite both being
-	# read_only in the DocType - that flag only blocks user-driven form
-	# edits, not programmatic writes). Re-applied on every call (not just at
-	# creation) so a later change to get_kanban_boards()'s field list reaches
-	# boards that already exist on this site via the patch re-running.
-	for board in get_kanban_boards():
-		name = board["kanban_board_name"]
-		card_settings = {
-			"filters": frappe.as_json(board["filters"]),
-			"fields": frappe.as_json(board["fields"]),
-			"show_labels": board["show_labels"],
-		}
-		if frappe.db.exists("Kanban Board", name):
-			frappe.db.set_value("Kanban Board", name, card_settings)
-			continue
-		doc_dict = {
-			"doctype": "Kanban Board",
-			"kanban_board_name": name,
-			"reference_doctype": board["reference_doctype"],
-			"field_name": board["field_name"],
-			"private": board["private"],
-			"columns": [{"column_name": column} for column in board["columns"]],
-			**card_settings,
-		}
-		frappe.get_doc(doc_dict).insert(ignore_permissions=True)
+		)
+		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))

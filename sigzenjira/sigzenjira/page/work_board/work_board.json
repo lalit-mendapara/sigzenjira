@@ -1,0 +1,16 @@
+{
+ "doctype": "Page",
+ "module": "Sigzenjira",
+ "name": "work-board",
+ "page_name": "work-board",
+ "title": "Work Board",
+ "standard": "Yes",
+ "roles": [
+  {"role": "Employee"},
+  {"role": "Director"},
+  {"role": "Product Owner"},
+  {"role": "Projects User"},
+  {"role": "Projects Manager"},
+  {"role": "System Manager"}
+ ]
+}

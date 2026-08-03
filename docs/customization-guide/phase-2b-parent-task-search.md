@@ -41,8 +41,8 @@ computing anything new.
 
 ## Where the code lives
 ```
-sigzenjira/install.py                              — set_task_search_fields()
-sigzenjira/patches/v0_0/add_task_search_fields.py   — applies it on an existing site
+sigzenjira/install.py   — set_task_search_fields()
+sigzenjira/fixtures/property_setter.json   — re-applied on every migrate
 ```
 
 ## Verified

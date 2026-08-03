@@ -17,8 +17,21 @@ WORK_ITEM_TYPE_NAME_PREFIX = {
 
 
 def autoname(doc, method):
+	# The name spells out the whole lineage, so any leaf points back at its root
+	# without a lookup: E-001 / E-001-S-001 / E-001-S-001-T-001 / ...-ST-001.
+	# The counter is per-parent because frappe's Series table is keyed on the
+	# literal prefix - "E-001-S-001-T-" gets its own row, so each parent's
+	# children number from 001 independently.
+	# A standalone Story/Task (OPTIONAL_PARENT_TYPES) has no parent to prefix
+	# with, so it falls back to a global counter for its own type.
 	prefix = WORK_ITEM_TYPE_NAME_PREFIX.get(doc.custom_work_item_type, "T")
-	doc.name = make_autoname(f"{prefix}.YY.-.#####")
+	base = f"{doc.parent_task}-{prefix}-" if doc.parent_task else f"{prefix}-"
+	# ponytail: the name records where the item was CREATED, not where it lives
+	# now - reparenting deliberately does not rename (a cascade rename would
+	# invalidate every reference already pasted into a mail/ticket, which is the
+	# exact thing this naming scheme exists to make durable).
+	# ponytail: 999 siblings per parent; widen to .#### if any parent gets close.
+	doc.name = make_autoname(base + ".###")
 
 
 EXPECTED_PARENT_TYPE = {

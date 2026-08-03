@@ -75,6 +75,18 @@
    "link_type": "Report",
    "show_arrow": 0,
    "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "panel-top",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Work Board",
+   "link_to": "work-board",
+   "link_type": "Page",
+   "show_arrow": 0,
+   "type": "Link"
   }
  ],
  "modified": "2026-07-30 12:45:23.845893",
