@@ -13,9 +13,20 @@ def force_is_billable_from_task(doc, method=None):
 	# and the corrected flag would never reach the billing computation.
 	#
 	# Rows with no task (plain activity logging) keep their manual checkbox.
+	task_names = {row.task for row in doc.time_logs if row.task}
+	if not task_names:
+		return
+
+	billable_by_task = {
+		task.name: cint(task.custom_is_billable)
+		for task in frappe.get_all(
+			"Task", filters={"name": ["in", list(task_names)]}, fields=["name", "custom_is_billable"]
+		)
+	}
+
 	for row in doc.time_logs:
 		if row.task:
-			row.is_billable = cint(frappe.db.get_value("Task", row.task, "custom_is_billable"))
+			row.is_billable = billable_by_task.get(row.task, 0)
 
 
 def validate_task_type(doc, method):

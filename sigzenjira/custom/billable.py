@@ -9,16 +9,22 @@ BILLABLE_FIELD = "custom_is_billable"
 # --- Permission gate: only privileged roles may change Billable ---
 
 
+def _has_declared_source(doc):
+	return any(doc.get(fieldname) for _parent_doctype, fieldname in PARENT_SOURCES.get(doc.doctype, ()))
+
+
 def validate_billable_edit_permission(doc, method=None):
 	# Billable is a money decision. Compared against the previous saved value
 	# rather than blanket-blocked, so an Employee can still save unrelated edits
 	# (status, progress) on a billable item without tripping this.
-	if doc.flags.ignore_permissions or doc.flags.via_issue_mapping or doc.flags.via_split_generation:
-		# Set by our own server-side propagation (generate_tasks_from_split
-		# inserts with ignore_permissions=True; make_story sets via_issue_mapping;
-		# create_task_without_hours sets via_split_generation) - the value was
-		# copied from an already-validated parent, not chosen by whoever
-		# happened to trigger the save.
+	if doc.is_new() and _has_declared_source(doc):
+		# On a new doc under a declared parent the flag is a clamp question, not a
+		# permission one: validate_billable_under_billable_parent already guarantees
+		# it can only be 1 if EVERY declared parent is 1, so it was inherited, never
+		# invented. Gating it here blocked the one thing an Employee may create - a
+		# Sub-task - under billable work, and pushed them toward unticking it, which
+		# is silent under-billing. A new doc with NO declared source (a Project, a
+		# standalone Story) has nothing to inherit from, so it stays gated below.
 		return
 
 	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
@@ -133,3 +139,34 @@ def validate_no_billable_dependants(doc, method=None):
 	frappe.throw(
 		_("Cannot turn off Billable while these are still billable: {0}. Unbill them first.").format(listed)
 	)
+
+
+def validate_split_row_unbilling(doc, method=None):
+	# Unticking a row's Billable pushes 0 onto its generated Task through a raw
+	# db.set_value in sync_split_row_edits_to_generated_task, which skips
+	# validate() - so validate_no_billable_dependants never sees it and billable
+	# Sub-tasks would be left hanging under a Task that just stopped being
+	# billable. Editing that Task directly throws; this closes the grid's way
+	# around it.
+	if doc.custom_work_item_type != "Story" or doc.is_new():
+		return
+
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+
+	before_rows = {row.name: cint(row.is_billable) for row in before.get("custom_task_split") or []}
+
+	for row in doc.get("custom_task_split") or []:
+		if cint(row.is_billable) or not before_rows.get(row.name) or not row.generated_task:
+			continue
+
+		dependants = frappe.get_all(
+			"Task", filters={"parent_task": row.generated_task, BILLABLE_FIELD: 1}, pluck="name"
+		)
+		if dependants:
+			frappe.throw(
+				_(
+					"Cannot turn off Billable on row {0} while these are still billable: {1}. Unbill them first."
+				).format(row.idx, ", ".join(dependants[:MAX_LISTED_DEPENDANTS]))
+			)

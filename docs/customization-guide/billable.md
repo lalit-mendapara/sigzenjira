@@ -144,14 +144,37 @@ cascading the un-bill down through every descendant) was rejected: this is a
 money decision, and a silent bulk rewrite of billing state is exactly the
 failure mode the whole feature exists to prevent.
 
-A Story and its own Task Split rows can still be unbilled together in one
-save — the DB still holds `is_billable=1` on the child rows while the
-parent's `validate()` runs, so reading rows from the DB here would wrongly
-block a save that legitimately unbills both at once. `validate_task_split_billable`
-(the upward check) already covers the split-row case more broadly than a
-downward check could (it fires on any save where the Story's flag is off and
-a row's is on, not only on a `1 → 0` transition), so there is no separate
-downward leg for split rows.
+A Story and its own Task Split rows can be unbilled together in one save
+**as long as none of those rows has generated a Task yet** — the DB still
+holds `is_billable=1` on the child rows while the parent's `validate()` runs,
+so reading rows from the DB here would wrongly block a save that legitimately
+unbills both at once. `validate_task_split_billable` (the upward check)
+already covers the split-row case more broadly than a downward check could (it
+fires on any save where the Story's flag is off and a row's is on, not only on
+a `1 → 0` transition), so there is no separate downward leg for split rows.
+
+**Caveat once a row has generated a Task.** That Task is a real child `Task`
+row in the DB with `custom_is_billable = 1`, and the row → Task push happens
+in `on_update` — *after* `validate`. So on the one-save attempt,
+`validate_no_billable_dependants` still sees the generated Task as billable
+and throws naming it. The working sequence is two steps: unbill the generated
+Task first (which pulls back onto its row via
+`sync_expected_hours_to_split_row`), then unbill the Story.
+
+### Downward, through the split grid — `validate_split_row_unbilling`
+Unticking a **row's** Billable is legal on its own (a non-billable row under a
+billable Story is a normal state), and `sync_split_row_edits_to_generated_task`
+pushes that `0` onto the row's generated Task with a raw `frappe.db.set_value`
+— which skips `validate()` entirely. Without a guard, that leaves any billable
+Sub-task hanging under a Task that just stopped being billable, and it keeps
+billing; the identical edit made by opening that Task directly throws. Since
+the split grid is the *primary* editing surface for a Story, this was the
+whole clamp's one-way hole.
+
+`validate_split_row_unbilling` closes it: on a Story save, for every row going
+`1 → 0` that has a `generated_task`, it looks for child Tasks of that
+generated Task still marked billable and throws naming them. Unbill those
+first, then the row.
 
 ## 4. Who may change it — `validate_billable_edit_permission`
 Gated to `WORK_ITEM_TYPE_PRIVILEGED_ROLES` (Director / Product Owner /
@@ -161,41 +184,41 @@ uses for work-item-type and expected-time edits. One implementation in
 loop (guarded to only run when `doc.doctype == "Task"` and the type is
 `Story`, so Project/Issue are unaffected by that extra leg).
 
-Compared against `get_doc_before_save()` rather than blanket-blocked, so a
-non-privileged user can still save unrelated edits (status, progress) on an
-already-billable item without tripping this — only an actual change to the
-flag throws.
+On an **existing** doc the new value is compared against
+`get_doc_before_save()` rather than blanket-blocked, so a non-privileged user
+can still save unrelated edits (status, progress) on an already-billable item
+without tripping this — only an actual change to the flag throws.
 
-**Three `doc.flags` escape hatches**, checked first and causing an early
-return, because in each case the value was copied from an already-validated
-parent rather than chosen by whoever happened to trigger the save:
+**On a new doc that declares a parent source, the gate is skipped entirely**
+(`_has_declared_source(doc)` — any `PARENT_SOURCES` fieldname on the doc is
+set). On a new doc the flag is a *clamp* question, not a permission one:
+`validate_billable_under_billable_parent` already guarantees it can only be
+`1` if **every** declared parent is `1`, so the value was inherited, never
+invented.
 
-- `doc.flags.ignore_permissions` — `generate_tasks_from_split` inserts the
-  generated Task with `ignore_permissions=True`.
-- `doc.flags.via_issue_mapping` — `make_story()` sets this; the Story's flag
-  came from the Issue, not from whoever ran `make_story`.
-- `doc.flags.via_split_generation` — `create_task_without_hours` sets this;
-  the Task's flag came from the split row, not from whoever clicked "Create
-  Task".
+This is not a convenience — gating it was actively harmful. `task.js`'s
+`seed_billable_from_source` seeds `custom_is_billable = 1` from the parent on
+`onload_post_render`, so an Employee clicking **Create Sub-task** on a billable
+Task got `Only a Director, Product Owner, or Projects Manager can change
+Billable.` on save. `validate_work_item_type_permission` makes Sub-task the
+only type an Employee may create, so that was their *entire* creation path,
+and their only way out was to untick the box — producing non-billable work
+under a billable parent, i.e. the silent under-billing this feature exists to
+prevent. The same applied to an Issue created on a billable Project.
 
-Without these, the *value itself being non-zero* would trip the gate for
-whichever non-privileged user (or system call) happened to be the one to
-save the copy — even though they never chose it.
+A new doc with **no** declared source has nothing to inherit from, so it stays
+gated: a new `Project` (`PARENT_SOURCES["Project"] = ()`), or a standalone
+Story with neither `project` nor `issue` nor `parent_task`. There a `1` really
+would be invented.
 
-**Known limitation, pre-existing, not fixed here:** `create_task_without_hours`
-is meant to let a Project User with the `custom_allocate_hours` Project User
-flag (but no privileged role) create a Task from a split row before its hours
-are known. In practice this path is unreachable for that user today —
-`validate_work_item_type_permission` (in `custom/task.py`, runs earlier in
-Task's `validate` chain) rejects any non-privileged, non-`Sub-task`
-classification before the request ever reaches the billable gate, because it
-only special-cases `doc.flags.via_issue_mapping`, not
-`via_split_generation`. This is a gap in `validate_work_item_type_permission`
-that predates and is unrelated to Billable — Billable's own permission gate
-handles its flag correctly (see `test_via_split_generation_flag_suppresses_the_permission_gate`
-in `test_billable.py`, which exercises the flag directly rather than through
-the blocked end-to-end flow). Documented here as a known limitation, not
-fixed, per the scope of this work.
+This rule also covers the three server-side creates that used to need
+`doc.flags` escape hatches — `generate_tasks_from_split` (inserts with
+`parent_task` set), `create_task_without_hours` (likewise) and `make_story()`
+(always sets `issue`) all declare a source, so all three flags were deleted.
+In particular the gate no longer consults the generic
+`doc.flags.ignore_permissions`, which was never a safe money-gate signal.
+(`custom/issue.py` still sets `via_issue_mapping` — `custom/task.py`'s
+`validate_work_item_type_permission` uses it for an unrelated purpose.)
 
 ## 5. Task Split ↔ generated Task — two-way sync
 No new sync machinery. `is_billable` joins `expected_hours` and `ecd` in the
@@ -203,6 +226,14 @@ two functions that already keep those two in step (`custom/task.py`):
 
 - `sync_split_row_edits_to_generated_task` — a row edit pushes to the Task.
 - `sync_expected_hours_to_split_row` — a Task edit pulls back to the row.
+
+Both push with a raw `frappe.db.set_value`, which skips `validate()` and so
+bypasses the clamp. These two are the **only** sanctioned raw writes to a
+billable flag (the invariant is stated in a comment above
+`sync_split_row_edits_to_generated_task`), and the row → Task direction needs
+`validate_split_row_unbilling` (§3) to stand in for the `validate()` it skips.
+Any new raw write to `Task.custom_is_billable` or `Task Split.is_billable`
+must name the guard that covers it, or go through `doc.save()`.
 
 ## 6. Timesheet — forced from the Task, locked in the Desk
 **Forcing the value.** `custom/timesheet.py:force_is_billable_from_task`,
@@ -272,14 +303,19 @@ sigzenjira/tests/test_billable.py          — field/clamp/permission/propagatio
 Epic-under-Project, Issue-under-Project, and the post-delivery-support case
 (Story clamped against its Issue, not just its Project); a billable parent
 allowing mixed billable/non-billable children; the split-row upward clamp;
-the downward clamp for Task/Project/Issue with a billable dependant, and that
-a Story and its own rows can be unbilled together in one save; the permission
-gate blocking a non-privileged change while allowing an unrelated field edit,
-and allowing a privileged one; `make_story` copying both a billable and an
-unbilled Issue's flag onto the Story; the Task Split ↔ Task two-way sync in
-both directions; the `via_split_generation` flag suppressing the permission
-gate; `create_task_without_hours` carrying a row's flag; and the Timesheet
-force in both directions plus the read-only Property Setter.
+the downward clamp for Task/Project/Issue with a billable dependant, that a
+Story and its own not-yet-generated rows can be unbilled together in one save,
+and that unticking a row whose generated Task still has a billable Sub-task
+throws (then succeeds once that Sub-task is unbilled); the permission gate
+blocking a non-privileged flag change, a non-privileged split-row flip and a
+non-privileged split-row *add*, while allowing an unrelated field edit and
+allowing a privileged change; the new-doc rule in both directions — an
+Employee may create a billable Sub-task under a billable Task, but may not
+invent a billable `Project` (a doc with no declared source); `make_story`
+copying both a billable and an unbilled Issue's flag onto the Story; the Task
+Split ↔ Task two-way sync in both directions; `create_task_without_hours`
+carrying a row's flag; and the Timesheet force in both directions plus the
+read-only Property Setter.
 
 The full `sigzenjira` suite (`bench --site mysite.in run-tests --app
 sigzenjira --skip-before-tests`) was run after this feature was complete;

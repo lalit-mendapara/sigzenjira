@@ -231,6 +231,7 @@ doc_events = {
 			"sigzenjira.custom.billable.validate_billable_edit_permission",
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_task_split_billable",
+			"sigzenjira.custom.billable.validate_split_row_unbilling",
 			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 		"on_update": [
@@ -245,9 +246,10 @@ doc_events = {
 		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
 	},
 	"Project": {
+		# No validate_billable_under_billable_parent here: PARENT_SOURCES["Project"]
+		# is empty (Project is the root), so it would be an unconditional no-op.
 		"validate": [
 			"sigzenjira.custom.billable.validate_billable_edit_permission",
-			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 	},

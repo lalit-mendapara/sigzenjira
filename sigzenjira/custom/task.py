@@ -89,9 +89,9 @@ def validate_work_item_type_permission(doc, method):
 
 	if doc.custom_work_item_type != "Sub-task":
 		frappe.throw(
-			_("Only a Director, Product Owner, or Projects Manager can set Work Item Type to {0}. You can only create a Sub-task.").format(
-				doc.custom_work_item_type
-			)
+			_(
+				"Only a Director, Product Owner, or Projects Manager can set Work Item Type to {0}. You can only create a Sub-task."
+			).format(doc.custom_work_item_type)
 		)
 
 
@@ -107,7 +107,9 @@ def validate_hierarchy(doc, method):
 		if doc.custom_work_item_type in OPTIONAL_PARENT_TYPES:
 			return
 		frappe.throw(
-			_("A {0} must have a parent task of type {1}.").format(doc.custom_work_item_type, expected_parent_type)
+			_("A {0} must have a parent task of type {1}.").format(
+				doc.custom_work_item_type, expected_parent_type
+			)
 		)
 
 	parent_work_item_type = frappe.db.get_value("Task", doc.parent_task, "custom_work_item_type")
@@ -169,7 +171,9 @@ def validate_expected_time_edit_permission(doc, method):
 	if EXPECTED_TIME_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
 		return
 
-	previous_expected_time = 0 if doc.is_new() else flt((doc.get_doc_before_save() or {}).get("expected_time"))
+	previous_expected_time = (
+		0 if doc.is_new() else flt((doc.get_doc_before_save() or {}).get("expected_time"))
+	)
 	if flt(doc.expected_time) != previous_expected_time:
 		frappe.throw(_("Only a Projects Manager can set or change Expected Time on an Epic."))
 
@@ -200,7 +204,11 @@ def validate_task_split_expected_hours_permission(doc, method):
 	for row in doc.get("custom_task_split") or []:
 		previous_hours = before_rows.get(row.name, 0)
 		if flt(row.expected_hours) != previous_hours:
-			frappe.throw(_("Only a user with Allocate Hours access on this Project can set Expected Hours on the Task Split table."))
+			frappe.throw(
+				_(
+					"Only a user with Allocate Hours access on this Project can set Expected Hours on the Task Split table."
+				)
+			)
 
 
 def validate_task_split_assign_permission(doc, method):
@@ -222,7 +230,11 @@ def validate_task_split_assign_permission(doc, method):
 
 	for row in doc.get("custom_task_split") or []:
 		if row.pending_assign_users != before_rows.get(row.name):
-			frappe.throw(_("You can only stage assignees on the Task Split table if you have Assign Users access on this Project."))
+			frappe.throw(
+				_(
+					"You can only stage assignees on the Task Split table if you have Assign Users access on this Project."
+				)
+			)
 
 
 def validate_one_story_per_issue(doc, method):
@@ -331,6 +343,16 @@ def delete_tasks_for_removed_split_rows(doc, method):
 		frappe.delete_doc("Task", old_row.generated_task)
 
 
+# INVARIANT: a raw frappe.db.set_value to a billable flag skips validate(), so
+# it bypasses the billable clamp entirely (custom/billable.py). The only two
+# sanctioned exceptions are the Task Split <-> generated Task mirror: this
+# function (row -> Task.custom_is_billable) and sync_expected_hours_to_split_row
+# below (Task -> row.is_billable). Both are safe only because the doc being
+# mirrored FROM was itself clamped on the save that triggered them - and the
+# row -> Task direction still needs validate_split_row_unbilling
+# (custom/billable.py) to stand in for the validate() it skips, because a row
+# going 1 -> 0 can strand billable Sub-tasks under the generated Task. Any new
+# raw write to either field must name the guard that covers it, or use save().
 def sync_split_row_edits_to_generated_task(doc, method):
 	# generate_tasks_from_split deliberately ignores edits to an
 	# already-generated row's expected_hours (see its own comment) - that
@@ -344,7 +366,9 @@ def sync_split_row_edits_to_generated_task(doc, method):
 		if not row.generated_task:
 			continue
 		if flt(row.expected_hours) != flt(frappe.db.get_value("Task", row.generated_task, "expected_time")):
-			frappe.db.set_value("Task", row.generated_task, "expected_time", flt(row.expected_hours), update_modified=False)
+			frappe.db.set_value(
+				"Task", row.generated_task, "expected_time", flt(row.expected_hours), update_modified=False
+			)
 
 		task_exp_end_date = frappe.db.get_value("Task", row.generated_task, "exp_end_date")
 		current_ecd = getdate(task_exp_end_date) if task_exp_end_date else None
@@ -385,7 +409,10 @@ def validate_hour_budget(doc, method):
 	if total_hours > parent_budget:
 		frappe.throw(
 			_("Total {0} hours under parent task {1} would be {2}h, exceeding its budget of {3}h.").format(
-				doc.custom_work_item_type, get_link_to_form("Task", doc.parent_task), total_hours, parent_budget
+				doc.custom_work_item_type,
+				get_link_to_form("Task", doc.parent_task),
+				total_hours,
+				parent_budget,
 			)
 		)
 
@@ -447,7 +474,9 @@ def generate_tasks_from_split(doc, method):
 		# assignment the moment the Task exists - same Story save, no extra
 		# round trip needed.
 		for user in json.loads(row.pending_assign_users) if row.pending_assign_users else []:
-			assign_to._add({"assign_to": [user], "doctype": "Task", "name": task.name}, ignore_permissions=True)
+			assign_to._add(
+				{"assign_to": [user], "doctype": "Task", "name": task.name}, ignore_permissions=True
+			)
 		if row.pending_assign_users:
 			frappe.db.set_value("Task Split", row.name, "pending_assign_users", None)
 
@@ -546,7 +575,9 @@ def create_task_without_hours(row_name):
 
 	story = frappe.get_doc("Task", row.parent)
 	if not user_has_project_flag(story.project, "custom_allocate_hours"):
-		frappe.throw(_("Only a user with Allocate Hours access on this Project can create a Task from this row."))
+		frappe.throw(
+			_("Only a user with Allocate Hours access on this Project can create a Task from this row.")
+		)
 
 	frappe.db.set_value("Task Split", row_name, "is_generating", 1)
 
@@ -563,11 +594,6 @@ def create_task_without_hours(row_name):
 			"custom_is_billable": row.is_billable,
 		}
 	)
-	# The flag is copied from an already-validated split row, not chosen by
-	# whoever clicked Create Task - a Project User with Allocate Hours but no
-	# privileged role must not be rejected by validate_billable_edit_permission
-	# for a value they never picked.
-	task.flags.via_split_generation = True
 	task.insert()
 
 	frappe.db.set_value("Task Split", row_name, "generated_task", task.name)
