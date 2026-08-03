@@ -130,6 +130,50 @@ function lock_story_to_template_only(frm) {
 	frm.refresh_fields();
 }
 
+// Additive on purpose. A row that already generated a Task can't be thrown
+// away and rebuilt (the Task would be orphaned), and a row a PM deliberately
+// dropped shouldn't silently come back on an unrelated save - so only the
+// template items with no matching task_item in the grid get appended. That
+// makes re-applying the template the way back from a deleted Task or a
+// hand-removed row, without touching anything already in flight.
+function apply_task_template(frm) {
+	if (!frm.doc.custom_task_template) {
+		return;
+	}
+
+	frappe.call({
+		method: "frappe.client.get",
+		args: { doctype: "Task Template", name: frm.doc.custom_task_template },
+		callback: function (r) {
+			// "Empty" means no row has real content yet - a blank row from
+			// clicking "Add Row" counts as empty, so a first apply clears it
+			// out rather than leaving a row that fails task_item's reqd.
+			const existing = new Set((frm.doc.custom_task_split || []).map((row) => row.task_item).filter(Boolean));
+			if (!existing.size) {
+				frm.clear_table("custom_task_split");
+			}
+
+			let added = 0;
+			(r.message.tasks || []).forEach(function (row) {
+				if (existing.has(row.task_item)) {
+					return;
+				}
+				const split_row = frm.add_child("custom_task_split");
+				split_row.task_item = row.task_item;
+				split_row.description = row.description;
+				added += 1;
+			});
+
+			frm.refresh_field("custom_task_split");
+			frappe.show_alert(
+				added
+					? __("Added {0} row(s) from {1}.", [added, frm.doc.custom_task_template])
+					: __("Task Split already has every item from {0}.", [frm.doc.custom_task_template])
+			);
+		},
+	});
+}
+
 frappe.ui.form.on("Task", {
 	onload: function (frm) {
 		inject_task_split_status_css();
@@ -186,6 +230,15 @@ frappe.ui.form.on("Task", {
 		lock_task_split_columns(frm);
 		refresh_task_split_status_colors(frm);
 
+		// Re-picking the value a Link field already holds fires no change
+		// event, so custom_task_template alone gives a Story that lost a row
+		// (deleted generated Task, row removed by hand) no way back to the
+		// template's full list. This is that way back - and being an explicit
+		// click, it can't resurrect a dropped row behind the PM's back.
+		if (frm.doc.custom_work_item_type === "Story" && frm.doc.custom_task_template) {
+			frm.add_custom_button(__("Apply Task Template"), () => apply_task_template(frm));
+		}
+
 		// Only on an already-saved item - a not-yet-created Epic has no
 		// name yet to link a new child's parent_task to.
 		if (frm.is_new()) {
@@ -223,31 +276,7 @@ frappe.ui.form.on("Task", {
 		});
 	},
 
-	custom_task_template: function (frm) {
-		// Only populate an empty split table - don't clobber rows a PM has
-		// already started filling in (or that already generated real Tasks)
-		// just because the template link got re-saved. "Empty" means no row
-		// has real content yet - a blank row from clicking "Add Row" still
-		// counts as empty, not as something to preserve.
-		const has_content_rows = (frm.doc.custom_task_split || []).some((row) => row.task_item);
-		if (!frm.doc.custom_task_template || has_content_rows) {
-			return;
-		}
-
-		frappe.call({
-			method: "frappe.client.get",
-			args: { doctype: "Task Template", name: frm.doc.custom_task_template },
-			callback: function (r) {
-				frm.clear_table("custom_task_split");
-				(r.message.tasks || []).forEach(function (row) {
-					const split_row = frm.add_child("custom_task_split");
-					split_row.task_item = row.task_item;
-					split_row.description = row.description;
-				});
-				frm.refresh_field("custom_task_split");
-			},
-		});
-	},
+	custom_task_template: apply_task_template,
 });
 
 // Task Split is a child table (istable=1) - it never renders as its own

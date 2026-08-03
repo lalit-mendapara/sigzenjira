@@ -31,6 +31,10 @@ def get_custom_fields():
 				"options": "\nEpic\nStory\nTask\nSub-task",
 				"insert_after": "subject",
 				"reqd": 1,
+				# Locked after the first save - the name (E-001-S-002-T-003) encodes
+				# the type, and reparenting deliberately never renames, so a type
+				# change would leave the name lying about the hierarchy.
+				"set_only_once": 1,
 			},
 			{
 				"fieldname": "custom_extra_hours",

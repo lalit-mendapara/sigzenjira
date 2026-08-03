@@ -2,6 +2,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.model.utils.user_settings import sync_user_settings, update_user_settings
 from frappe.utils import getdate
 
 # Org-wide oversight: every project's board, plus the Department view. Director
@@ -140,6 +141,27 @@ def _extra_fields(raw):
 	return [f for f in selected if f in allowed]
 
 
+@frappe.whitelist()
+def save_card_fields(fields):
+	"""Persist the user's card-field picks.
+
+	Not frappe.model.user_settings.save() from the client, for two reasons:
+	that path writes to redis only (the __UserSettings flush is the hourly
+	sync_user_settings job), so a bench restart before the next flush silently
+	loses the pick; and its client-side merge reads frappe.model.user_settings
+	[doctype], which only the Task list view populates - saving from the board
+	would wipe the list view's filters and vice versa.
+	"""
+	_guard_board_access()
+	fields = _extra_fields(fields)
+	update_user_settings("Task", {"work_board_card_fields": fields})
+	# ponytail: flushes every cached user setting, not just this row - same work
+	# the hourly job already does, now on a click. Narrow it only if the hash
+	# grows big enough for that to matter.
+	sync_user_settings()
+	return fields
+
+
 def _task_summary(row, info, project_names=None, extra_fields=None):
 	summary = {
 		"name": row["name"],
@@ -259,8 +281,10 @@ def _epic_stories(item):
 		"Task",
 		filters={"parent_task": item, "custom_work_item_type": "Story"},
 		# `issue` is set for Stories raised through the Issue-to-Story cycle
-		# (custom/issue.py) - the lane links straight back to it.
-		fields=["name", "subject", "status", "issue"],
+		# (custom/issue.py) - the lane links straight back to it. `epic` is the parent
+		# by definition here, but the client groups on that field either way and must
+		# not have to special-case where the Stories came from.
+		fields=["name", "subject", "status", "issue", "parent_task as epic"],
 		order_by="creation asc",
 	)
 
@@ -289,31 +313,50 @@ def _project_stats(project):
 
 
 def _stat_filter_stories(project, stat_type, stat_status, epic=None):
-	"""Story names a stat tile allows through, or None when no tile is active.
+	"""(story names, epic names) a stat tile allows through.
 
-	Both tile kinds resolve to a set of Stories, because Stories are what the
-	board lays out: "Story Working" is the Working Stories, "Epic Open" is every
-	Story under an Open Epic.
+	Story names are None when no tile is active. Both tile kinds resolve to a set of
+	Stories, because Stories are what the board lays out: "Story Working" is the
+	Working Stories, "Epic Open" is every Story under an Open Epic.
+
+	The Epic names come back alongside because an Epic tile groups the board by Epic,
+	and an Epic with no Stories at all has nothing in the Story list to be inferred
+	from - it would go missing and leave the board one block short of its own tile
+	count. Empty for a Story tile, which lays its lanes out flat.
 	"""
 	if stat_type not in ("Epic", "Story") or stat_status not in STAT_STATUSES:
-		return None
+		return None, []
 
 	filters = {"project": project, "custom_work_item_type": "Story"}
 	if stat_type == "Story":
 		filters["status"] = stat_status
 		if epic:
 			filters["parent_task"] = epic
-	else:
-		epics = frappe.get_all(
-			"Task",
-			filters={"project": project, "custom_work_item_type": "Epic", "status": stat_status},
-			pluck="name",
-		)
-		if not epics or (epic and epic not in epics):
-			return []
-		filters["parent_task"] = epic if epic else ["in", epics]
+		return frappe.get_all("Task", filters=filters, pluck="name"), []
 
-	return frappe.get_all("Task", filters=filters, pluck="name")
+	epics = frappe.get_all(
+		"Task",
+		filters={"project": project, "custom_work_item_type": "Epic", "status": stat_status},
+		pluck="name",
+	)
+	if not epics or (epic and epic not in epics):
+		return [], []
+	filters["parent_task"] = epic if epic else ["in", epics]
+
+	return frappe.get_all("Task", filters=filters, pluck="name"), ([epic] if epic else epics)
+
+
+def _epic_details(names):
+	"""Epic headers for a board that groups by Epic - kept even with no Stories under
+	them, so the number of blocks on the board matches the number the tile counted."""
+	if not names:
+		return []
+	return frappe.get_all(
+		"Task",
+		filters={"name": ["in", list(names)]},
+		fields=["name", "subject", "status"],
+		order_by="creation asc",
+	)
 
 
 def _stories_detail(names):
@@ -335,36 +378,47 @@ def _stories_detail(names):
 	epic_names = {story["parent_task"] for story in stories if story["parent_task"]}
 	epics = (
 		{
-			row["name"]: row["subject"]
-			for row in frappe.get_all("Task", filters={"name": ["in", list(epic_names)]}, fields=["name", "subject"])
+			row["name"]: row
+			for row in frappe.get_all(
+				"Task", filters={"name": ["in", list(epic_names)]}, fields=["name", "subject", "status"]
+			)
 		}
 		if epic_names
 		else {}
 	)
 	for story in stories:
 		story["epic"] = story["parent_task"]
-		story["epic_subject"] = epics.get(story["parent_task"])
+		# The Epic's own subject and status - an Epic tile groups its lanes under an
+		# Epic header, and nothing else on a project-wide board carries them.
+		epic = epics.get(story["parent_task"]) or {}
+		story["epic_subject"] = epic.get("subject")
+		story["epic_status"] = epic.get("status")
 	return stories
 
 
 def _ecd_range_conditions(from_date, to_date):
-	"""ECD range as get_all conditions - empty when neither bound is given.
+	"""ECD range as (filters, or_filters) for get_all - both empty with no bounds.
+
+	A Task with no ECD is never excluded by the range: undated work is still work,
+	and the range is there to bound the fetch, not to hide it.
 
 	Two things this has to get right:
 	- exp_end_date is a Datetime, so each bound is widened to cover the whole of its
 	  day; a plain date comparison would drop anything not sitting at midnight.
-	- frappe wraps comparisons in ifnull(), so a Task with no ECD would otherwise
-	  satisfy `<= to_date`. The explicit is-set condition is what keeps undated Tasks
-	  off the board while the range is on.
+	- frappe wraps `<=` in ifnull() (a NULL ECD passes) but not `>=` (a NULL ECD
+	  fails). So the lower bound goes through or_filters with an explicit is-not-set
+	  beside it, which is what keeps undated Tasks on the board. get_all ANDs the two
+	  groups: `base AND ecd <= to AND (ecd is null OR ecd >= from)`.
 	"""
-	if not from_date and not to_date:
-		return []
-	conditions = [["exp_end_date", "is", "set"]]
+	conditions, or_conditions = [], []
 	if from_date:
-		conditions.append(["exp_end_date", ">=", f"{getdate(from_date)} 00:00:00"])
+		or_conditions = [
+			["exp_end_date", "is", "not set"],
+			["exp_end_date", ">=", f"{getdate(from_date)} 00:00:00"],
+		]
 	if to_date:
 		conditions.append(["exp_end_date", "<=", f"{getdate(to_date)} 23:59:59"])
-	return conditions
+	return conditions, or_conditions
 
 
 @frappe.whitelist()
@@ -383,6 +437,8 @@ def get_project_board(
 	extra = _extra_fields(extra_fields)
 	work_item_type = None
 	stat_stories = None
+	stat_epics = []
+	chain, path = [], {}
 
 	if not item:
 		# Default board for a freshly picked Project: its Tasks whose ECD falls in
@@ -390,7 +446,8 @@ def get_project_board(
 		# the first load is bounded instead of pulling the project's whole history.
 		# The range deliberately does not apply once a work item is picked - that
 		# board always shows its full tree.
-		stat_stories = _stat_filter_stories(project, stat_type, stat_status)
+		stat_stories, stat_epics = _stat_filter_stories(project, stat_type, stat_status)
+		range_filters, range_or_filters = _ecd_range_conditions(from_date, to_date)
 		rows = (
 			[]
 			if stat_stories == []
@@ -401,8 +458,9 @@ def get_project_board(
 					["custom_work_item_type", "=", "Task"],
 					["status", "in", OPEN_STATUSES],
 					*([["parent_task", "in", stat_stories]] if stat_stories else []),
-					*_ecd_range_conditions(from_date, to_date),
+					*range_filters,
 				],
+				or_filters=range_or_filters,
 				fields=TASK_FIELDS + extra,
 			)
 		)
@@ -420,11 +478,23 @@ def get_project_board(
 		if work_item_type not in WORK_ITEM_TYPES:
 			frappe.throw(_("{0} cannot be shown on the board").format(item))
 
+		chain = _ancestry(item)
+		path = {node["work_item_type"]: node["name"] for node in chain}
+
 		# A tile only narrows a board that lays Stories out; a Story or Task board
 		# is already one item deep, so the tiles are inert there (the client greys
 		# them out to match).
 		if work_item_type == "Epic":
-			stat_stories = _stat_filter_stories(project, stat_type, stat_status, epic=item)
+			stat_stories, stat_epics = _stat_filter_stories(project, stat_type, stat_status, epic=item)
+			# The picked Epic is the one block the board draws. Only an Epic tile can
+			# take it away - that is the tile deciding the Epic does not match.
+			if stat_type != "Epic":
+				stat_epics = [item]
+		else:
+			# A Story or Task is drawn in the same Epic > Story > cards nesting as
+			# everything else, rather than as a bare column of cards under a
+			# breadcrumb - its ancestry is what says which blocks to build.
+			stat_epics = [path["Epic"]] if path.get("Epic") else []
 
 		rows = _descendant_tasks(item, work_item_type, TASK_FIELDS + extra, story_names=stat_stories)
 
@@ -445,13 +515,16 @@ def get_project_board(
 		key=lambda m: m["full_name"],
 	)
 
-	# Only an Epic has Stories to lay out beside its board, and an active tile
-	# drops the lanes it filtered out along with their cards.
+	# An Epic lays out every Story under it; a picked Story or Task lays out the one
+	# Story it belongs to, so the same nesting draws it. An active tile drops the
+	# lanes it filtered out along with their cards.
 	if work_item_type == "Epic":
 		stories = _epic_stories(item)
 		if stories and stat_stories is not None:
 			allowed = set(stat_stories)
 			stories = [story for story in stories if story["name"] in allowed]
+	elif work_item_type in ("Story", "Task"):
+		stories = _stories_detail([path["Story"]] if path.get("Story") else [])
 	elif not item:
 		# Every Story the board could group by: the ones a tile matched (kept even
 		# with no open Task, that emptiness is the answer to "which Stories are
@@ -466,36 +539,36 @@ def get_project_board(
 	return {
 		"tasks": _sort_tasks([_task_summary(row, info, extra_fields=extra) for row in rows]),
 		"members": members,
-		"context": _ancestry(item) if item else [],
+		# The picked item's chain: the sections the client opens down to, so what was
+		# searched for is the one thing already on screen. Empty on a tile-filtered
+		# board, which starts fully collapsed.
+		"path": [node["name"] for node in chain],
+		"item_type": work_item_type,
 		"stories": stories,
+		# Empty only when nothing Epic-shaped is on the board - a Story tile lays its
+		# lanes out flat, and so does the Overdue filter.
+		"epics": _epic_details(stat_epics),
 		"stats": _project_stats(project),
 		"extra_fields": extra,
 	}
 
 
 def _ancestry(item):
-	# Selected item first, then its parents, so the board can show "this Story is
-	# Working, and the Epic above it is Open" without a second round trip. At most
-	# 3 hops (Task > Story > Epic), and it stops at whatever the chain ends on.
+	"""The picked item's chain, outermost first - Epic, then Story, then the item.
+
+	Two jobs: it tells the board which Epic and Story to build blocks for when
+	something below Epic level is picked, and it is the path the client opens down to
+	so the picked item is the one thing already visible. At most 3 hops
+	(Task > Story > Epic), stopping at whatever the chain ends on.
+	"""
 	chain = []
 	name = item
 	while name and len(chain) < 3:
-		row = frappe.db.get_value(
-			"Task", name, ["name", "subject", "status", "custom_work_item_type", "parent_task"], as_dict=True
-		)
+		row = frappe.db.get_value("Task", name, ["name", "custom_work_item_type", "parent_task"], as_dict=True)
 		if not row:
 			break
-		chain.append(
-			{
-				"name": row.name,
-				"subject": row.subject,
-				"status": row.status,
-				"work_item_type": row.custom_work_item_type,
-			}
-		)
+		chain.append({"name": row.name, "work_item_type": row.custom_work_item_type})
 		name = row.parent_task
-	# Outermost ancestor first - reads Epic > Story > Task, same order as the
-	# hierarchy itself.
 	return list(reversed(chain))
 
 

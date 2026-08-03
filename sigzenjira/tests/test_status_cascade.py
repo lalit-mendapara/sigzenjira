@@ -44,15 +44,15 @@ class TestStatusCascade(IntegrationTestCase):
 		self.assertEqual(status_of(t1.name), "Open")
 
 		set_status(s1.name, "Completed")
-		self.assertEqual(status_of(t1.name), "Open")  # s2 still open
+		self.assertEqual(status_of(t1.name), "Working")  # s2 still open -> partial progress
 
 		set_status(s2.name, "Completed")
 		self.assertEqual(status_of(t1.name), "Completed")  # both subs done -> Task auto-completes
-		self.assertEqual(status_of(story1.name), "Open")  # T2 still open, Story must not complete yet
+		self.assertEqual(status_of(story1.name), "Working")  # T2 still open, Story must not complete yet
 
 		set_status(t2.name, "Completed")
 		self.assertEqual(status_of(story1.name), "Completed")  # both Tasks done -> Story auto-completes
-		self.assertEqual(status_of(epic.name), "Open")  # Story-2 still open
+		self.assertEqual(status_of(epic.name), "Working")  # Story-2 still open
 
 		set_status(t3.name, "Completed")
 		self.assertEqual(status_of(story2.name), "Completed")
@@ -60,9 +60,41 @@ class TestStatusCascade(IntegrationTestCase):
 
 		# Reopen a leaf sub-task -> must un-complete the whole chain back up.
 		set_status(s1.name, "Working")
-		self.assertEqual(status_of(t1.name), "Open")
-		self.assertEqual(status_of(story1.name), "Open")
-		self.assertEqual(status_of(epic.name), "Open")
+		self.assertEqual(status_of(t1.name), "Working")
+		self.assertEqual(status_of(story1.name), "Working")
+		self.assertEqual(status_of(epic.name), "Working")
+
+	def test_manual_status_edit_on_a_parent_is_overruled(self):
+		story = make_task("PH7 Manual Story", "Story", expected_time=4)
+		task = make_task("PH7 Manual Task", "Task", story.name, expected_time=4)
+
+		set_status(task.name, "Working")
+		self.assertEqual(status_of(story.name), "Working")
+
+		# PM drags the Story back to Open by hand while its Task is Working.
+		set_status(story.name, "Open")
+		self.assertEqual(status_of(story.name), "Working")
+
+		# Forward to Completed is core's own guard (depends_on), not ours.
+		with self.assertRaises(frappe.ValidationError):
+			set_status(story.name, "Completed")
+
+		# A leaf keeps its manual status - nothing below it to derive from.
+		set_status(task.name, "Pending Review")
+		self.assertEqual(status_of(task.name), "Pending Review")
+
+	def test_story_stays_working_while_a_split_row_is_ungenerated(self):
+		story = make_task("PH7 Split Story", "Story", expected_time=0)
+		story.append("custom_task_split", {"task_item": "Done bit", "expected_hours": 3})
+		story.append("custom_task_split", {"task_item": "Not costed yet"})  # no hours -> no Task
+		story.save()
+
+		generated = frappe.get_all("Task", filters={"parent_task": story.name}, pluck="name")
+		self.assertEqual(len(generated), 1)
+
+		set_status(generated[0], "Completed")
+		# Every existing child is done, but one split row never became a Task.
+		self.assertEqual(status_of(story.name), "Working")
 
 	def test_task_with_no_subtasks_is_never_auto_touched(self):
 		story = make_task("PH7 Leaf Story", "Story", expected_time=5)

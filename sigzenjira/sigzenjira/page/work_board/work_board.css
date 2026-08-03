@@ -141,50 +141,6 @@
 	color: var(--text-muted);
 }
 
-/* ---------- context strip ---------- */
-
-.wb-context {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 0.5rem;
-	margin: 1rem 0 1.25rem;
-}
-
-.wb-context .wb-context-item {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	padding: 0.4rem 0.75rem;
-	background: var(--fg-color);
-	border: 1px solid var(--border-color);
-	border-radius: 999px;
-	box-shadow: none;
-}
-
-.wb-context .wb-context-item:hover {
-	border-color: var(--gray-400);
-	background: var(--bg-light-gray, var(--control-bg));
-}
-
-.wb-context-type {
-	font-size: var(--text-xs);
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
-	color: var(--text-light, var(--text-muted));
-}
-
-.wb-context-subject {
-	font-size: var(--text-sm);
-	font-weight: 600;
-}
-
-.wb-context-sep {
-	color: var(--text-light, var(--text-muted));
-	font-size: var(--text-md);
-}
-
 /* ---------- stat tiles ---------- */
 
 .wb-stats {
@@ -277,16 +233,6 @@
 	font-size: var(--text-md);
 }
 
-.wb-hint {
-	margin: 0 0 0.85rem;
-	padding: 0.5rem 0.75rem;
-	border: 1px solid var(--border-color);
-	border-radius: var(--wb-radius);
-	background: var(--bg-color, var(--fg-color));
-	color: var(--text-muted);
-	font-size: var(--text-xs);
-}
-
 .wb-section {
 	margin-bottom: 1.25rem;
 	border: 1px solid var(--border-color);
@@ -368,6 +314,29 @@
 .wb-cards::-webkit-scrollbar-thumb {
 	background: var(--gray-300);
 	border-radius: 999px;
+}
+
+/* ---------- Epic > Story nesting ---------- */
+
+/* An Epic section holds Story lanes, not columns, so its body stacks instead of
+   laying out a scrollable flex row. */
+.wb-epic-body {
+	padding: 0.85rem;
+}
+
+.wb-epic-section > .wb-section-title {
+	background: var(--bg-light-gray, var(--control-bg));
+}
+
+/* Nested lanes sit on the section's tinted body, so they take the plain fg colour
+   to stay distinct from the Epic header above them. */
+.wb-epic-body > .wb-section {
+	margin-bottom: 0.6rem;
+	background: var(--fg-color);
+}
+
+.wb-epic-body > .wb-section:last-child {
+	margin-bottom: 0;
 }
 
 /* Epic the lane's Story belongs to - sits next to the lane title, muted, so the

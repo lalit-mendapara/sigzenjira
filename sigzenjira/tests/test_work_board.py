@@ -8,6 +8,7 @@ from sigzenjira.sigzenjira.work_board import (
 	get_bootstrap,
 	get_department_board,
 	get_project_board,
+	save_card_fields,
 	search_work_items,
 )
 
@@ -271,6 +272,17 @@ class TestWorkBoard(IntegrationTestCase):
 		self.assertIn("expected_time", options)
 		self.assertNotIn("subject", options)
 		self.assertNotIn("status", options)
+
+	def test_card_fields_reach_the_database_not_just_the_cache(self):
+		from frappe.model.utils.user_settings import get_user_settings
+
+		frappe.set_user(self.member)
+		save_card_fields(json.dumps(["expected_time", "modified_by"]))
+		# Dropping the cache is what a bench restart does. Before save_card_fields
+		# existed the client wrote redis only, so the pick died here.
+		frappe.cache.delete_key("_user_settings")
+		settings = json.loads(get_user_settings("Task"))
+		self.assertEqual(settings["work_board_card_fields"], ["expected_time"])
 
 	def test_item_from_another_project_is_rejected(self):
 		with self.assertRaises(frappe.ValidationError):

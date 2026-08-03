@@ -164,6 +164,26 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		)
 		self.assertIn("Administrator", assigned)
 
+	def test_deleting_generated_task_removes_its_row_and_never_regenerates(self):
+		epic = make_task("AE Regen Epic", "Epic", expected_time=10)
+		story = make_task("AE Regen Story", "Story", epic.name)
+		story.append("custom_task_split", {"task_item": "T1", "expected_hours": 4})
+		story.save()
+
+		story.reload()
+		generated_task = story.custom_task_split[0].generated_task
+
+		frappe.delete_doc("Task", generated_task)
+
+		story.reload()
+		self.assertEqual(len(story.custom_task_split), 0)
+
+		# Saving again must not resurrect the line the deletion removed.
+		story.save()
+
+		story.reload()
+		self.assertEqual(len(story.custom_task_split), 0)
+
 	def test_backfill_patch_populates_existing_rows(self):
 		epic = make_task("AE Backfill Epic", "Epic", expected_time=10)
 		story = make_task("AE Backfill Story", "Story", epic.name)

@@ -219,6 +219,7 @@ doc_events = {
 		"validate": [
 			"sigzenjira.custom.task.validate_work_item_type_permission",
 			"sigzenjira.custom.task.validate_hierarchy",
+			"sigzenjira.custom.task.block_manual_task_under_story",
 			"sigzenjira.custom.task.validate_one_story_per_issue",
 			"sigzenjira.custom.task.validate_task_split_expected_hours_permission",
 			"sigzenjira.custom.task.validate_task_split_assign_permission",
@@ -229,6 +230,7 @@ doc_events = {
 			"sigzenjira.custom.task.sync_actual_extra_hours",
 		],
 		"on_update": [
+			"sigzenjira.custom.task.delete_tasks_for_removed_split_rows",
 			"sigzenjira.custom.task.generate_tasks_from_split",
 			"sigzenjira.custom.task.sync_split_row_edits_to_generated_task",
 			"sigzenjira.custom.task.sync_expected_hours_to_split_row",
@@ -296,7 +298,7 @@ doc_events = {
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
 # override_doctype_dashboards = {
-# 	"Task": "sigzenjira.task.get_dashboard_data"
+# 	"Task": "sigzenjira.custom.task_dashboard.get_dashboard_data"
 # }
 
 # exempt linked doctypes from being automatically cancelled

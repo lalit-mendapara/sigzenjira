@@ -133,7 +133,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Task", generated_task, "expected_time"), 5)
 
-	def test_deleting_task_cleans_up_depends_on_and_split_row(self):
+	def test_deleting_task_cleans_up_depends_on_and_deletes_split_row(self):
 		epic = make_task("SR Del Epic", "Epic", expected_time=10)
 		story = frappe.get_doc(
 			{
@@ -161,8 +161,37 @@ class TestStorySplitRollup(IntegrationTestCase):
 
 		story.reload()
 		self.assertNotIn(t1, [row.task for row in story.depends_on])
+		# The row goes too - deleting from either side removes both.
 		self.assertEqual([row.generated_task for row in story.custom_task_split], [t2])
 		self.assertEqual(story.expected_time, 2)
+
+	def test_removing_split_row_deletes_its_generated_task(self):
+		epic = make_task("SR RowDel Epic", "Epic", expected_time=10)
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "SR RowDel Story",
+				"custom_work_item_type": "Story",
+				"parent_task": epic.name,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Keep", "expected_hours": 3})
+		story.append("custom_task_split", {"task_item": "Drop", "expected_hours": 2})
+		story.insert()
+
+		story.reload()
+		keep_task = story.custom_task_split[0].generated_task
+		drop_task = story.custom_task_split[1].generated_task
+
+		story.remove(story.custom_task_split[1])
+		story.save()
+
+		self.assertFalse(frappe.db.exists("Task", drop_task))
+		self.assertTrue(frappe.db.exists("Task", keep_task))
+
+		story.reload()
+		self.assertEqual([row.generated_task for row in story.custom_task_split], [keep_task])
+		self.assertEqual(story.expected_time, 3)
 
 	def test_non_privileged_user_cannot_add_split_row(self):
 		user = "test_split_row_employee@example.com"
@@ -198,3 +227,31 @@ class TestStorySplitRollup(IntegrationTestCase):
 				story_as_employee.save()
 		finally:
 			frappe.set_user("Administrator")
+
+	def test_manual_task_under_story_is_blocked(self):
+		epic = make_task("SR Manual Epic", "Epic", expected_time=10)
+		story = make_task("SR Manual Story", "Story", epic.name)
+
+		with self.assertRaises(frappe.ValidationError):
+			make_task("SR Manual Task", "Task", story.name, expected_time=2)
+
+	def test_standalone_task_still_allowed(self):
+		task = make_task("SR Standalone Task", "Task", expected_time=2)
+		self.assertTrue(frappe.db.exists("Task", task.name))
+
+	def test_split_generated_task_still_saves(self):
+		epic = make_task("SR Gen Epic", "Epic", expected_time=10)
+		story = make_task("SR Gen Story", "Story", epic.name)
+
+		story.append("custom_task_split", {"task_item": "T1", "expected_hours": 4})
+		story.save()
+		story.reload()
+
+		generated_task = story.custom_task_split[0].generated_task
+		self.assertTrue(generated_task)
+
+		# a later edit to the generated Task must not trip the guard
+		task = frappe.get_doc("Task", generated_task)
+		task.expected_time = 3
+		task.save()
+		self.assertEqual(frappe.db.get_value("Task", generated_task, "expected_time"), 3)

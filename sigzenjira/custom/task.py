@@ -122,6 +122,36 @@ def validate_hierarchy(doc, method):
 		)
 
 
+def block_manual_task_under_story(doc, method):
+	# A Story's Tasks come only from its Task Split grid
+	# (generate_tasks_from_split). task.js hides the "Create Task" button on a
+	# Story, but the list view, the API and the Work Board can all still land a
+	# Task here - and one with no split row is invisible to
+	# rollup_story_expected_time (which derives the Story's total from the rows
+	# alone) while still counting against it in validate_hour_budget. Enforce
+	# the same rule server-side, where every write path goes through.
+	if doc.custom_work_item_type != "Task" or not doc.parent_task:
+		return
+
+	if frappe.db.get_value("Task", doc.parent_task, "custom_work_item_type") != "Story":
+		return
+
+	if frappe.db.exists("Task Split", {"parent": doc.parent_task, "generated_task": doc.name}):
+		return
+
+	# The legitimate split path inserts the Task BEFORE writing generated_task
+	# back onto the row, so during that window the only proof the Task belongs
+	# to a row is the is_generating claim generate_tasks_from_split sets first.
+	if doc.is_new() and frappe.db.exists("Task Split", {"parent": doc.parent_task, "is_generating": 1}):
+		return
+
+	frappe.throw(
+		_("Add Tasks to {0} through its Task Split table, not directly.").format(
+			get_link_to_form("Task", doc.parent_task)
+		)
+	)
+
+
 EXPECTED_TIME_RESTRICTED_TYPES = {"Epic"}
 EXPECTED_TIME_PRIVILEGED_ROLES = {"Projects Manager", "System Manager"}
 
@@ -273,6 +303,32 @@ def rollup_story_expected_time(doc, method):
 		return
 
 	doc.expected_time = sum(flt(row.expected_hours) for row in split_rows)
+
+
+def delete_tasks_for_removed_split_rows(doc, method):
+	# A split row and its generated Task are the same work item seen from two
+	# places - dropping the row from the grid has to take the Task with it,
+	# otherwise the Story keeps a child that traces back to no plan line.
+	# Frappe has already deleted the removed rows from the DB by now, so the
+	# pre-save snapshot is the only place their generated_task still exists.
+	if doc.custom_work_item_type != "Story":
+		return
+
+	before = doc.get_doc_before_save()
+	if not before:
+		return
+
+	kept = {row.name for row in doc.get("custom_task_split") or []}
+	for old_row in before.get("custom_task_split") or []:
+		if old_row.name in kept or not old_row.generated_task:
+			continue
+		if not frappe.db.exists("Task", old_row.generated_task):
+			continue
+		# Deliberately not forced: core blocks deleting a Task that has
+		# sub-tasks or linked Timesheets, and dropping a plan line that
+		# already has real work under it should fail loudly, not silently
+		# take the work with it.
+		frappe.delete_doc("Task", old_row.generated_task)
 
 
 def sync_split_row_edits_to_generated_task(doc, method):
@@ -514,6 +570,12 @@ def cleanup_task_references_on_delete(doc, method):
 		return
 
 	row_name, story_name = split_row
+
+	# The row goes with it. Leaving the row behind (reset to "not generated")
+	# only meant the next Story save recreated the Task, so a deletion from
+	# the list view silently undid itself. Deleting from either side now
+	# means the same thing - see delete_tasks_for_removed_split_rows for the
+	# other direction.
 	frappe.db.delete("Task Split", {"name": row_name})
 
 	story_total = flt(
@@ -526,6 +588,19 @@ def cascade_completion_to_parent(doc, method):
 	# Sub-task -> Task, Task -> Story, Story -> Epic all use the same
 	# parent_task link, so one generic "recompute from direct children"
 	# recursion covers every level instead of writing it three times.
+	#
+	# The self-recompute first: a status on anything that HAS children is
+	# derived, never hand-set. Someone flipping a Story from Working back to
+	# Open (or straight to Completed) while its Tasks say otherwise gets
+	# overruled here, on their own save, instead of the wrong value sitting
+	# there until some child happens to be saved again. Leaf items have no
+	# children, so their status stays entirely manual.
+	corrected = _sync_status_from_children(doc.name)
+	if corrected:
+		# Keep the doc the client gets back in step with what we just wrote,
+		# and let the later on_update hooks (issue sync) see the real status.
+		doc.status = corrected
+
 	if doc.parent_task:
 		_sync_status_from_children(doc.parent_task)
 
@@ -535,16 +610,27 @@ def _sync_status_from_children(task_name):
 	if not children:
 		return
 
-	all_completed = all(c.status == "Completed" for c in children)
 	current_status = frappe.db.get_value("Task", task_name, "status")
+	if current_status in ("Cancelled", "Template"):
+		return
 
-	if all_completed and current_status != "Completed":
+	# A Task Split row with no expected_hours yet has no generated Task, so it
+	# isn't in `children` at all - the Story is still missing planned work and
+	# must not be allowed to look Completed.
+	split_pending = frappe.db.exists(
+		"Task Split", {"parent": task_name, "generated_task": ["in", ("", None)]}
+	)
+
+	if not split_pending and all(c.status == "Completed" for c in children):
 		new_status = "Completed"
-	elif not all_completed and current_status == "Completed":
-		# A child was reopened after this task had been auto-completed -
-		# don't leave it lying about being done.
-		new_status = "Open"
+	elif any(c.status != "Open" for c in children):
+		# Work has started somewhere below (or finished, with more still to
+		# come) - anything short of fully done reads as Working.
+		new_status = "Working"
 	else:
+		new_status = "Open"
+
+	if new_status == current_status:
 		return
 
 	frappe.db.set_value("Task", task_name, "status", new_status, update_modified=False)
@@ -552,3 +638,5 @@ def _sync_status_from_children(task_name):
 	parent = frappe.db.get_value("Task", task_name, "parent_task")
 	if parent:
 		_sync_status_from_children(parent)
+
+	return new_status
