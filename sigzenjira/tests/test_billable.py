@@ -125,3 +125,71 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError) as caught:
 			story.insert()
 		self.assertIn("marked Billable", str(caught.exception))
+
+
+class TestBillableDownwardClamp(IntegrationTestCase):
+	def test_unchecking_task_with_billable_subtask_throws(self):
+		# Sub-task under Task is the manual parent/child pair with no creation
+		# gate - block_manual_task_under_story forbids adding a Task straight to
+		# a Story, so a Task/Story pair here would throw for that reason instead.
+		task = make_task("BC Down Task", "Task", expected_time=10, is_billable=1)
+		make_task("BC Down Sub", "Sub-task", task.name, is_billable=1)
+
+		task.reload()
+		task.custom_is_billable = 0
+		with self.assertRaises(frappe.ValidationError) as caught:
+			task.save()
+		self.assertIn("still billable", str(caught.exception))
+
+	def test_unchecking_task_with_only_non_billable_subtasks_succeeds(self):
+		task = make_task("BC Down Free Task", "Task", expected_time=10, is_billable=1)
+		make_task("BC Down Free Sub", "Sub-task", task.name, is_billable=0)
+
+		task.reload()
+		task.custom_is_billable = 0
+		task.save()
+
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 0)
+
+	def test_unchecking_project_with_billable_issue_throws(self):
+		project = make_project("BC Down Project", is_billable=1)
+		make_issue("BC Down Issue", project=project.name, is_billable=1)
+
+		project.reload()
+		project.custom_is_billable = 0
+		with self.assertRaises(frappe.ValidationError) as caught:
+			project.save()
+		self.assertIn("still billable", str(caught.exception))
+
+	def test_unchecking_issue_with_billable_story_throws(self):
+		project = make_project("BC Down Issue Project", is_billable=1)
+		issue = make_issue("BC Down Billed Issue", project=project.name, is_billable=1)
+		make_task("BC Down Issue Story", "Story", project=project.name, issue=issue.name, is_billable=1)
+
+		issue.reload()
+		issue.custom_is_billable = 0
+		with self.assertRaises(frappe.ValidationError) as caught:
+			issue.save()
+		self.assertIn("still billable", str(caught.exception))
+
+	def test_story_and_its_rows_can_be_unbilled_in_one_save(self):
+		# The DB still holds is_billable=1 on the child rows while the parent's
+		# validate() runs, so reading rows from the DB here would throw on a
+		# save that legitimately unbills both at once.
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Down Both Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Some work", "is_billable": 1})
+		story.insert()
+
+		story.reload()
+		story.custom_is_billable = 0
+		story.custom_task_split[0].is_billable = 0
+		story.save()
+
+		self.assertEqual(frappe.db.get_value("Task", story.name, "custom_is_billable"), 0)

@@ -230,6 +230,7 @@ doc_events = {
 			"sigzenjira.custom.task.sync_actual_extra_hours",
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
 			"sigzenjira.custom.billable.validate_task_split_billable",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 		"on_update": [
 			"sigzenjira.custom.task.delete_tasks_for_removed_split_rows",
@@ -245,11 +246,13 @@ doc_events = {
 	"Project": {
 		"validate": [
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 	},
 	"Issue": {
 		"validate": [
 			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 	},
 	"ToDo": {
