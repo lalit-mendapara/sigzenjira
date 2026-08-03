@@ -2,6 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from sigzenjira.custom.issue import make_story
+from sigzenjira.custom.task import create_task_without_hours
 
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
 # a doctype folder (frappe/tests/classes/integration_test_case.py:59 raises
@@ -401,3 +402,37 @@ class TestBillablePropagation(IntegrationTestCase):
 			frappe.set_user("Administrator")
 
 		self.assertEqual(frappe.db.get_value("Task", allowed.name, "custom_is_billable"), 1)
+
+	def test_create_task_without_hours_carries_the_rows_billable_flag(self):
+		# Nothing else in the app calls this function, so without a direct test
+		# its dict key and get_value field-list entry are unverified. Run as
+		# Administrator: user_has_project_flag returns True unconditionally for
+		# it, so both the Allocate Hours gate and the work-item-type gate clear.
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Prop Uncosted Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Billed uncosted", "is_billable": 1})
+		story.append("custom_task_split", {"task_item": "Free uncosted", "is_billable": 0})
+		story.insert()
+		story.reload()
+
+		# Assert right after each call, before the next one - core ERPNext's
+		# Task.on_update -> populate_depends_on() does a real parent.save() on
+		# every child Task insert (see generate_tasks_from_split's own comment
+		# on this same re-entrancy). That re-triggers the Story's on_update
+		# chain, including sync_split_row_edits_to_generated_task, which by the
+		# second call would find the first row's generated_task already set
+		# and push its billable flag independently - masking a broken
+		# create_task_without_hours behind the OTHER sync path. Checking
+		# billed_task before free_task exists keeps this test isolated to the
+		# function under test.
+		billed_task = create_task_without_hours(story.custom_task_split[0].name)
+		self.assertEqual(frappe.db.get_value("Task", billed_task, "custom_is_billable"), 1)
+
+		free_task = create_task_without_hours(story.custom_task_split[1].name)
+		self.assertEqual(frappe.db.get_value("Task", free_task, "custom_is_billable"), 0)
