@@ -30,6 +30,8 @@ def make_task_under_story(story, task_item, expected_hours=0, status="Open", is_
 	story.save()
 	story.reload()
 
+	# ponytail: assumes task_item is unique within a Story - true at every
+	# call site today, and a duplicate would silently return the first match.
 	row = next(r for r in story.custom_task_split if r.task_item == task_item)
 	task = frappe.get_doc("Task", row.generated_task)
 

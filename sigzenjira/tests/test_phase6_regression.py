@@ -3,6 +3,8 @@ from frappe.model.workflow import apply_workflow
 from frappe.tests import IntegrationTestCase
 from frappe.utils import flt
 
+from .test_status_cascade import make_task_under_story
+
 
 def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 	doc = frappe.get_doc(
@@ -55,12 +57,12 @@ class TestPhase6Regression(IntegrationTestCase):
 		story1 = make_task("PH6 Story-1", "Story", epic.name, expected_time=4)
 		story2 = make_task("PH6 Story-2", "Story", epic.name, expected_time=6)
 
-		t1 = make_task("PH6 S1-T1", "Task", story1.name, expected_time=2)
-		make_task("PH6 S1-T2", "Task", story1.name, expected_time=2)
+		t1 = make_task_under_story(story1, "PH6 S1-T1", 2)
+		make_task_under_story(story1, "PH6 S1-T2", 2)
 
-		s2t1 = make_task("PH6 S2-T1", "Task", story2.name, expected_time=1)
-		make_task("PH6 S2-T2", "Task", story2.name, expected_time=3)
-		make_task("PH6 S2-T3", "Task", story2.name, expected_time=2)
+		s2t1 = make_task_under_story(story2, "PH6 S2-T1", 1)
+		make_task_under_story(story2, "PH6 S2-T2", 3)
+		make_task_under_story(story2, "PH6 S2-T3", 2)
 
 		self.assertEqual(extra_hours(epic.name), 0)
 
@@ -93,7 +95,7 @@ class TestPhase6Regression(IntegrationTestCase):
 			# Task's parent must be a Story, not an Epic
 			make_task("PH6 Task under Epic", "Task", epic.name, expected_time=1)
 
-		task = make_task("PH6 H Task", "Task", story.name, expected_time=5)
+		task = make_task_under_story(story, "PH6 H Task", 5)
 
 		with self.assertRaises(frappe.ValidationError):
 			# Sub-task's parent must be a Task, not a Story
@@ -108,9 +110,9 @@ class TestPhase6Regression(IntegrationTestCase):
 	def test_03_rollup_and_reject(self):
 		epic = make_task("PH6 R Epic", "Epic", expected_time=10)
 		story = make_task("PH6 R Story", "Story", epic.name, expected_time=6)
-		t1 = make_task("PH6 R T1", "Task", story.name, expected_time=1)
-		make_task("PH6 R T2", "Task", story.name, expected_time=3)
-		make_task("PH6 R T3", "Task", story.name, expected_time=2)
+		t1 = make_task_under_story(story, "PH6 R T1", 1)
+		t2 = make_task_under_story(story, "PH6 R T2", 3)
+		make_task_under_story(story, "PH6 R T3", 2)
 
 		ahr1 = make_ahr(t1.name, 2)
 		approve(ahr1)
@@ -118,8 +120,7 @@ class TestPhase6Regression(IntegrationTestCase):
 		self.assertEqual(extra_hours(story.name), 2)
 		self.assertEqual(extra_hours(epic.name), 2)
 
-		t2 = frappe.db.get_value("Task", {"subject": "PH6 R T2"})
-		ahr2 = make_ahr(t2, 1)
+		ahr2 = make_ahr(t2.name, 1)
 		approve(ahr2)
 		self.assertEqual(extra_hours(story.name), 3)
 		self.assertEqual(extra_hours(epic.name), 3)
