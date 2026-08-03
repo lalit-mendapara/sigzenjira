@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.desk.form import assign_to
 from frappe.model.naming import make_autoname
-from frappe.utils import flt, get_link_to_form, getdate
+from frappe.utils import cint, flt, get_link_to_form, getdate
 
 from sigzenjira.custom.project_user import user_has_project_flag
 
@@ -352,6 +352,13 @@ def sync_split_row_edits_to_generated_task(doc, method):
 		if row_ecd != current_ecd:
 			frappe.db.set_value("Task", row.generated_task, "exp_end_date", row_ecd, update_modified=False)
 
+		if cint(row.is_billable) != cint(
+			frappe.db.get_value("Task", row.generated_task, "custom_is_billable")
+		):
+			frappe.db.set_value(
+				"Task", row.generated_task, "custom_is_billable", cint(row.is_billable), update_modified=False
+			)
+
 
 def validate_hour_budget(doc, method):
 	# A standalone Story/Task (no parent) has no budget to check against.
@@ -427,6 +434,7 @@ def generate_tasks_from_split(doc, method):
 				"description": row.description,
 				"custom_work_item_type": "Task",
 				"expected_time": row.expected_hours,
+				"custom_is_billable": row.is_billable,
 				"priority": doc.priority,
 				"exp_end_date": row.ecd,
 			}
@@ -463,6 +471,7 @@ def sync_expected_hours_to_split_row(doc, method):
 		{
 			"expected_hours": doc.expected_time,
 			"ecd": getdate(doc.exp_end_date) if doc.exp_end_date else None,
+			"is_billable": cint(doc.custom_is_billable),
 		},
 	)
 
@@ -518,7 +527,16 @@ def create_task_without_hours(row_name):
 	row = frappe.db.get_value(
 		"Task Split",
 		row_name,
-		["parent", "task_item", "description", "ecd", "generated_task", "is_generating", "pending_assign_users"],
+		[
+			"parent",
+			"task_item",
+			"description",
+			"ecd",
+			"generated_task",
+			"is_generating",
+			"pending_assign_users",
+			"is_billable",
+		],
 		as_dict=True,
 	)
 	if not row:
@@ -542,8 +560,15 @@ def create_task_without_hours(row_name):
 			"custom_work_item_type": "Task",
 			"priority": story.priority,
 			"exp_end_date": row.ecd,
+			"custom_is_billable": row.is_billable,
 		}
-	).insert()
+	)
+	# The flag is copied from an already-validated split row, not chosen by
+	# whoever clicked Create Task - a Project User with Allocate Hours but no
+	# privileged role must not be rejected by validate_billable_edit_permission
+	# for a value they never picked.
+	task.flags.via_split_generation = True
+	task.insert()
 
 	frappe.db.set_value("Task Split", row_name, "generated_task", task.name)
 

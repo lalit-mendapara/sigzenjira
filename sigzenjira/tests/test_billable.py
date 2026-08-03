@@ -1,6 +1,9 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from sigzenjira.custom.issue import make_story
+from sigzenjira.custom.task import create_task_without_hours
+
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
 # a doctype folder (frappe/tests/classes/integration_test_case.py:59 raises
 # NotImplementedError otherwise - see test_work_board.py for the same note).
@@ -276,3 +279,120 @@ class TestBillablePermission(IntegrationTestCase):
 			self.assertIn("Task Split", str(caught.exception))
 		finally:
 			frappe.set_user("Administrator")
+
+
+class TestBillablePropagation(IntegrationTestCase):
+	def test_make_story_copies_billable_issue(self):
+		project = make_project("BC Prop Billed Project", is_billable=1)
+		issue = make_issue("BC Prop Billed Issue", project=project.name, is_billable=1)
+
+		story = frappe.get_doc("Task", make_story(issue.name))
+
+		self.assertEqual(story.custom_is_billable, 1)
+
+	def test_make_story_copies_unbilled_support_issue(self):
+		# Post-delivery support: Project still billable, this Issue is not.
+		project = make_project("BC Prop Support Project", is_billable=1)
+		issue = make_issue("BC Prop Support Issue", project=project.name, is_billable=0)
+
+		story = frappe.get_doc("Task", make_story(issue.name))
+
+		self.assertEqual(story.custom_is_billable, 0)
+
+	def test_split_row_generates_billable_task(self):
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Prop Split Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Billed item", "expected_hours": 3, "is_billable": 1})
+		story.append("custom_task_split", {"task_item": "Free item", "expected_hours": 2, "is_billable": 0})
+		story.insert()
+
+		story.reload()
+		billed_row, free_row = story.custom_task_split[0], story.custom_task_split[1]
+
+		self.assertEqual(frappe.db.get_value("Task", billed_row.generated_task, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", free_row.generated_task, "custom_is_billable"), 0)
+
+	def test_unchecking_split_row_pushes_to_generated_task(self):
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Prop Push Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Push item", "expected_hours": 3, "is_billable": 1})
+		story.insert()
+		story.reload()
+
+		story.custom_task_split[0].is_billable = 0
+		story.save()
+
+		self.assertEqual(
+			frappe.db.get_value("Task", story.custom_task_split[0].generated_task, "custom_is_billable"), 0
+		)
+
+	def test_unchecking_generated_task_pulls_back_to_split_row(self):
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Prop Pull Story",
+				"custom_work_item_type": "Story",
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Pull item", "expected_hours": 3, "is_billable": 1})
+		story.insert()
+		story.reload()
+		row_name = story.custom_task_split[0].name
+
+		generated = frappe.get_doc("Task", story.custom_task_split[0].generated_task)
+		generated.custom_is_billable = 0
+		generated.save()
+
+		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 0)
+
+	def test_create_task_without_hours_carries_billable_for_allocate_hours_user(self):
+		# A Project User with Allocate Hours but no privileged role must be able
+		# to create a Task from a billable row - the flag is copied, not chosen.
+		user = ensure_billable_employee_user()
+		project = make_project("BC Prop Allocate Project", is_billable=1)
+		project_doc = frappe.get_doc("Project", project.name)
+		project_doc.append(
+			"users",
+			{
+				"user": user,
+				"custom_allocate_hours": 1,
+				"custom_assign_users": 0,
+				"custom_approve_extra_hours": 0,
+			},
+		)
+		project_doc.save(ignore_permissions=True)
+
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Prop Allocate Story",
+				"custom_work_item_type": "Story",
+				"project": project.name,
+				"custom_is_billable": 1,
+			}
+		)
+		story.append("custom_task_split", {"task_item": "Uncosted billable item", "is_billable": 1})
+		story.insert()
+		story.reload()
+		row_name = story.custom_task_split[0].name
+
+		frappe.set_user(user)
+		try:
+			task_name = create_task_without_hours(row_name)
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertEqual(frappe.db.get_value("Task", task_name, "custom_is_billable"), 1)

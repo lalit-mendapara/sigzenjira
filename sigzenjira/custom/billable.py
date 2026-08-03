@@ -13,11 +13,12 @@ def validate_billable_edit_permission(doc, method=None):
 	# Billable is a money decision. Compared against the previous saved value
 	# rather than blanket-blocked, so an Employee can still save unrelated edits
 	# (status, progress) on a billable item without tripping this.
-	if doc.flags.ignore_permissions or doc.flags.via_issue_mapping:
+	if doc.flags.ignore_permissions or doc.flags.via_issue_mapping or doc.flags.via_split_generation:
 		# Set by our own server-side propagation (generate_tasks_from_split
-		# inserts with ignore_permissions=True; make_story sets via_issue_mapping)
-		# - the value was copied from an already-validated parent, not chosen by
-		# whoever happened to trigger the save.
+		# inserts with ignore_permissions=True; make_story sets via_issue_mapping;
+		# create_task_without_hours sets via_split_generation) - the value was
+		# copied from an already-validated parent, not chosen by whoever
+		# happened to trigger the save.
 		return
 
 	if WORK_ITEM_TYPE_PRIVILEGED_ROLES & set(frappe.get_roles(frappe.session.user)):
