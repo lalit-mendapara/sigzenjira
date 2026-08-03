@@ -220,20 +220,19 @@ frappe.ui.form.on("Task", {
 	},
 
 	parent_task(frm) {
-		seed_billable_from_source(frm);
+		// Only while new. On a saved document this would silently overwrite a
+		// deliberate choice - a non-billable Task under a billable Story is
+		// legitimate, and reparenting it must not quietly start billing it.
+		if (frm.is_new()) {
+			seed_billable_from_source(frm);
+		}
 	},
 
 	project(frm) {
-		seed_billable_from_source(frm);
-	},
-
-	// A new Task Split row starts wherever the Story is - the server clamp
-	// then makes a billable row under a non-billable Story impossible anyway.
-	// This lives on the Task handler object (not Task Split's) because grid
-	// row-add events fire on the parent form's script_manager, not the child
-	// doctype's - see Grid.add_new_row in frappe's grid.js.
-	custom_task_split_add: function (frm, cdt, cdn) {
-		frappe.model.set_value(cdt, cdn, "is_billable", cint(frm.doc.custom_is_billable));
+		// Same reasoning as parent_task above.
+		if (frm.is_new()) {
+			seed_billable_from_source(frm);
+		}
 	},
 
 	onload: function (frm) {
@@ -354,6 +353,18 @@ frappe.ui.form.on("Task", {
 // the parent's - this file already loads on every Task/Story form via the
 // doctype_js hook, so registering the child doctype's events here works.
 frappe.ui.form.on("Task Split", {
+	// A new row starts wherever the Story is - the server clamp then makes a
+	// billable row under a non-billable Story impossible anyway. Grid row-add
+	// events fire with the CHILD doctype (frappe/form/grid.js:
+	// `this.frm.script_manager.trigger(this.df.fieldname + "_add", d.doctype, d.name)`
+	// where d is the new child row), so this belongs on "Task Split", not "Task"
+	// - erpnext's own stock_entry.js registers items_add the same way, on
+	// "Stock Entry Detail". Unguarded by frm.is_new(): a split row is always
+	// new the moment it's added, even to an already-saved Story.
+	custom_task_split_add: function (frm, cdt, cdn) {
+		frappe.model.set_value(cdt, cdn, "is_billable", cint(frm.doc.custom_is_billable));
+	},
+
 	create_action: function (frm, cdt, cdn) {
 		if (frm.__task_split_perms && !frm.__task_split_perms.allocate_hours) {
 			frappe.msgprint(
