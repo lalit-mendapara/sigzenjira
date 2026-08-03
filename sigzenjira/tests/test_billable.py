@@ -2,7 +2,6 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from sigzenjira.custom.issue import make_story
-from sigzenjira.custom.task import create_task_without_hours
 
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
 # a doctype folder (frappe/tests/classes/integration_test_case.py:59 raises
@@ -330,13 +329,15 @@ class TestBillablePropagation(IntegrationTestCase):
 		story.append("custom_task_split", {"task_item": "Push item", "expected_hours": 3, "is_billable": 1})
 		story.insert()
 		story.reload()
+		generated = story.custom_task_split[0].generated_task
+		# Generation seeded it from the row; without this the post-assert below
+		# could not tell a working push from a field that was never set.
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 1)
 
 		story.custom_task_split[0].is_billable = 0
 		story.save()
 
-		self.assertEqual(
-			frappe.db.get_value("Task", story.custom_task_split[0].generated_task, "custom_is_billable"), 0
-		)
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 0)
 
 	def test_unchecking_generated_task_pulls_back_to_split_row(self):
 		story = frappe.get_doc(
@@ -351,6 +352,9 @@ class TestBillablePropagation(IntegrationTestCase):
 		story.insert()
 		story.reload()
 		row_name = story.custom_task_split[0].name
+		# Generation seeded it from the row; without this the post-assert below
+		# could not tell a working pull from a field that was never set.
+		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 1)
 
 		generated = frappe.get_doc("Task", story.custom_task_split[0].generated_task)
 		generated.custom_is_billable = 0
@@ -358,41 +362,42 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 0)
 
-	def test_create_task_without_hours_carries_billable_for_allocate_hours_user(self):
-		# A Project User with Allocate Hours but no privileged role must be able
-		# to create a Task from a billable row - the flag is copied, not chosen.
+	def test_via_split_generation_flag_suppresses_the_permission_gate(self):
+		# create_task_without_hours copies the flag off an already-validated
+		# split row, so whoever clicks Create Task never chose it - hence the
+		# flag. Driven directly here rather than through that whole flow,
+		# because validate_work_item_type_permission blocks a non-privileged
+		# user from creating a Task-type item long before the billable gate.
 		user = ensure_billable_employee_user()
-		project = make_project("BC Prop Allocate Project", is_billable=1)
-		project_doc = frappe.get_doc("Project", project.name)
-		project_doc.append(
-			"users",
-			{
-				"user": user,
-				"custom_allocate_hours": 1,
-				"custom_assign_users": 0,
-				"custom_approve_extra_hours": 0,
-			},
-		)
-		project_doc.save(ignore_permissions=True)
-
-		story = frappe.get_doc(
-			{
-				"doctype": "Task",
-				"subject": "BC Prop Allocate Story",
-				"custom_work_item_type": "Story",
-				"project": project.name,
-				"custom_is_billable": 1,
-			}
-		)
-		story.append("custom_task_split", {"task_item": "Uncosted billable item", "is_billable": 1})
-		story.insert()
-		story.reload()
-		row_name = story.custom_task_split[0].name
+		parent = make_task("BC Flag Parent", "Task", expected_time=10, is_billable=1)
 
 		frappe.set_user(user)
 		try:
-			task_name = create_task_without_hours(row_name)
+			blocked = frappe.get_doc(
+				{
+					"doctype": "Task",
+					"subject": "BC Flag Sub Blocked",
+					"custom_work_item_type": "Sub-task",
+					"parent_task": parent.name,
+					"custom_is_billable": 1,
+				}
+			)
+			with self.assertRaises(frappe.ValidationError) as caught:
+				blocked.insert()
+			self.assertIn("change Billable", str(caught.exception))
+
+			allowed = frappe.get_doc(
+				{
+					"doctype": "Task",
+					"subject": "BC Flag Sub Allowed",
+					"custom_work_item_type": "Sub-task",
+					"parent_task": parent.name,
+					"custom_is_billable": 1,
+				}
+			)
+			allowed.flags.via_split_generation = True
+			allowed.insert()
 		finally:
 			frappe.set_user("Administrator")
 
-		self.assertEqual(frappe.db.get_value("Task", task_name, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", allowed.name, "custom_is_billable"), 1)
