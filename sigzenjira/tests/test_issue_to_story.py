@@ -3,6 +3,8 @@ from frappe.tests import IntegrationTestCase
 
 from sigzenjira.custom.issue import make_story
 
+from .test_status_cascade import make_task_under_story
+
 
 def make_issue(subject="Test Issue", issue_type=None, priority=None, project=None):
 	doc = frappe.get_doc(
@@ -68,17 +70,10 @@ class TestIssueToStory(IntegrationTestCase):
 		issue = make_issue("Cascade should not resolve")
 		story = frappe.get_doc("Task", make_story(issue.name))
 
-		subtask = frappe.get_doc(
-			{
-				"doctype": "Task",
-				"subject": "Sub piece",
-				"custom_work_item_type": "Task",
-				"parent_task": story.name,
-			}
-		)
-		subtask.insert()
-		subtask.status = "Completed"
-		subtask.save()
+		# A Story's Tasks come only from its Task Split grid
+		# (custom/task.py:block_manual_task_under_story) - same fix as
+		# test_status_cascade.py and friends.
+		make_task_under_story(story, "Sub piece", expected_hours=1, status="Completed")
 
 		self.assertEqual(frappe.db.get_value("Task", story.name, "status"), "Completed")
 		self.assertNotEqual(frappe.db.get_value("Issue", issue.name, "status"), "Resolved")
