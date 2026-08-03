@@ -59,17 +59,29 @@ class TestBillableFields(IntegrationTestCase):
 
 
 class TestBillableUpwardClamp(IntegrationTestCase):
-	def test_billable_task_under_non_billable_story_throws(self):
-		story = make_task("BC Clamp Story", "Story", expected_time=10, is_billable=0)
+	def test_billable_subtask_under_non_billable_task_throws(self):
+		# Sub-task under Task is the manual parent/child pair with no creation
+		# gate - block_manual_task_under_story forbids adding a Task straight to
+		# a Story, so a Task/Story pair here would throw for that reason instead
+		# and the clamp would never be exercised.
+		task = make_task("BC Clamp Task", "Task", expected_time=10, is_billable=0)
 
-		with self.assertRaises(frappe.ValidationError):
-			make_task("BC Clamp Task", "Task", story.name, expected_time=2, is_billable=1)
+		with self.assertRaises(frappe.ValidationError) as caught:
+			make_task("BC Clamp Sub", "Sub-task", task.name, is_billable=1)
+		self.assertIn("not billable", str(caught.exception))
 
-	def test_billable_story_allows_mixed_children(self):
-		story = make_task("BC Mixed Story", "Story", expected_time=10, is_billable=1)
+	def test_billable_story_under_non_billable_epic_throws(self):
+		epic = make_task("BC Clamp Epic", "Epic", expected_time=20, is_billable=0)
 
-		billed = make_task("BC Billed Task", "Task", story.name, expected_time=2, is_billable=1)
-		free = make_task("BC Free Task", "Task", story.name, expected_time=2, is_billable=0)
+		with self.assertRaises(frappe.ValidationError) as caught:
+			make_task("BC Clamp Story", "Story", epic.name, expected_time=10, is_billable=1)
+		self.assertIn("not billable", str(caught.exception))
+
+	def test_billable_parent_allows_mixed_children(self):
+		task = make_task("BC Mixed Task", "Task", expected_time=10, is_billable=1)
+
+		billed = make_task("BC Billed Sub", "Sub-task", task.name, is_billable=1)
+		free = make_task("BC Free Sub", "Sub-task", task.name, is_billable=0)
 
 		self.assertEqual(billed.custom_is_billable, 1)
 		self.assertEqual(free.custom_is_billable, 0)
@@ -77,14 +89,16 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 	def test_billable_epic_under_non_billable_project_throws(self):
 		project = make_project("BC Free Project", is_billable=0)
 
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError) as caught:
 			make_task("BC Billed Epic", "Epic", project=project.name, is_billable=1)
+		self.assertIn("not billable", str(caught.exception))
 
 	def test_billable_issue_under_non_billable_project_throws(self):
 		project = make_project("BC Free Project 2", is_billable=0)
 
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError) as caught:
 			make_issue("BC Billed Issue", project=project.name, is_billable=1)
+		self.assertIn("not billable", str(caught.exception))
 
 	def test_story_clamps_against_its_issue_not_just_its_project(self):
 		# The post-delivery support case: Project stays billable, the support
@@ -93,8 +107,9 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 		project = make_project("BC Support Project", is_billable=1)
 		issue = make_issue("BC Free Support", project=project.name, is_billable=0)
 
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError) as caught:
 			make_task("BC Support Story", "Story", project=project.name, issue=issue.name, is_billable=1)
+		self.assertIn("not billable", str(caught.exception))
 
 	def test_billable_split_row_under_non_billable_story_throws(self):
 		story = frappe.get_doc(
@@ -107,5 +122,6 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 		)
 		story.append("custom_task_split", {"task_item": "Billed work", "is_billable": 1})
 
-		with self.assertRaises(frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError) as caught:
 			story.insert()
+		self.assertIn("marked Billable", str(caught.exception))
