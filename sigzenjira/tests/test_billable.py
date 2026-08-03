@@ -1,5 +1,6 @@
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import today
 
 from sigzenjira.custom.issue import make_story
 from sigzenjira.custom.task import create_task_without_hours
@@ -436,3 +437,88 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		free_task = create_task_without_hours(story.custom_task_split[1].name)
 		self.assertEqual(frappe.db.get_value("Task", free_task, "custom_is_billable"), 0)
+
+
+def make_billable_test_employee():
+	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	return frappe.get_doc(
+		{
+			"doctype": "Employee",
+			"first_name": "BC Timesheet Tester",
+			"company": company,
+			"status": "Active",
+			"gender": "Male",
+			"date_of_birth": "1995-01-01",
+			"date_of_joining": "2024-01-01",
+		}
+	).insert()
+
+
+class TestBillableTimesheetLock(IntegrationTestCase):
+	def test_row_against_non_billable_task_is_forced_off(self):
+		employee = make_billable_test_employee()
+		task = make_task("BC TS Free Task", "Task", expected_time=5, is_billable=0)
+
+		timesheet = frappe.get_doc(
+			{
+				"doctype": "Timesheet",
+				"employee": employee.name,
+				"time_logs": [
+					{
+						"activity_type": "Execution",
+						"task": task.name,
+						"from_time": f"{today()} 09:00:00",
+						"hours": 2,
+						"is_billable": 1,
+					}
+				],
+			}
+		).insert()
+
+		self.assertEqual(timesheet.time_logs[0].is_billable, 0)
+
+	def test_row_against_billable_task_is_forced_on(self):
+		employee = make_billable_test_employee()
+		task = make_task("BC TS Billed Task", "Task", expected_time=5, is_billable=1)
+
+		timesheet = frappe.get_doc(
+			{
+				"doctype": "Timesheet",
+				"employee": employee.name,
+				"time_logs": [
+					{
+						"activity_type": "Execution",
+						"task": task.name,
+						"from_time": f"{today()} 09:00:00",
+						"hours": 2,
+						"is_billable": 0,
+					}
+				],
+			}
+		).insert()
+
+		self.assertEqual(timesheet.time_logs[0].is_billable, 1)
+
+	def test_row_without_task_keeps_its_manual_flag(self):
+		employee = make_billable_test_employee()
+
+		timesheet = frappe.get_doc(
+			{
+				"doctype": "Timesheet",
+				"employee": employee.name,
+				"time_logs": [
+					{
+						"activity_type": "Execution",
+						"from_time": f"{today()} 09:00:00",
+						"hours": 2,
+						"is_billable": 1,
+					}
+				],
+			}
+		).insert()
+
+		self.assertEqual(timesheet.time_logs[0].is_billable, 1)
+
+	def test_timesheet_detail_is_billable_is_read_only_when_task_set(self):
+		meta_field = frappe.get_meta("Timesheet Detail").get_field("is_billable")
+		self.assertEqual(meta_field.read_only_depends_on, "eval:doc.task")

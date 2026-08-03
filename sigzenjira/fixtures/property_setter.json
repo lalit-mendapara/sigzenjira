@@ -366,5 +366,21 @@
   "property_type": "Select",
   "row_name": null,
   "value": "Open\nWIP\nIN-QA\nIN-UAT\nResolved\nOn Hold\nClosed"
+ },
+ {
+  "default_value": null,
+  "doc_type": "Timesheet Detail",
+  "docstatus": 0,
+  "doctype": "Property Setter",
+  "doctype_or_field": "DocField",
+  "field_name": "is_billable",
+  "is_system_generated": 1,
+  "modified": "2026-08-04 00:36:23.163481",
+  "module": null,
+  "name": "Timesheet Detail-is_billable-read_only_depends_on",
+  "property": "read_only_depends_on",
+  "property_type": "Code",
+  "row_name": null,
+  "value": "eval:doc.task"
  }
 ]

@@ -28,6 +28,7 @@ def after_install():
 	set_task_costing_permlevel()
 	set_task_status_options()
 	set_issue_status_options()
+	set_timesheet_detail_billable_readonly()
 	create_task_projects_manager_docperm()
 	create_task_template_director_po_docperm()
 	create_task_template_employee_docperm()
@@ -36,6 +37,7 @@ def after_install():
 	add_work_board_workspace_shortcut()
 	frappe.clear_cache(doctype="Task")
 	frappe.clear_cache(doctype="Issue")
+	frappe.clear_cache(doctype="Timesheet Detail")
 
 
 def set_task_search_fields():
@@ -71,6 +73,14 @@ def set_task_status_options():
 
 def set_issue_status_options():
 	make_property_setter("Issue", "status", "options", ISSUE_STATUS_OPTIONS, "Select")
+
+
+def set_timesheet_detail_billable_readonly():
+	# Billable is forced from the Task (custom/timesheet.py:force_is_billable_from_task),
+	# so editing the cell would only ever be undone on save. read_only_depends_on
+	# rather than a flat read_only so task-less activity rows keep their manual
+	# checkbox - a flat lock would be a regression for non-task time logging.
+	make_property_setter("Timesheet Detail", "is_billable", "read_only_depends_on", "eval:doc.task", "Code")
 
 
 PERM_FLAG_FIELDS = [

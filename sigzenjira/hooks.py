@@ -265,6 +265,7 @@ doc_events = {
 		"on_trash": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
 	},
 	"Timesheet": {
+		"before_validate": "sigzenjira.custom.timesheet.force_is_billable_from_task",
 		"validate": "sigzenjira.custom.timesheet.validate_task_type",
 		"on_submit": "sigzenjira.custom.timesheet.rollup_actual_time",
 		"on_cancel": "sigzenjira.custom.timesheet.rollup_actual_time",

@@ -1,6 +1,21 @@
 import frappe
 from frappe import _
-from frappe.utils import flt, get_link_to_form
+from frappe.utils import cint, flt, get_link_to_form
+
+
+def force_is_billable_from_task(doc, method=None):
+	# Billing is decided upstream on the work item, never per time entry.
+	#
+	# Must be before_validate, not validate: frappe composes doc_event handlers
+	# to run AFTER the controller's own method (Document.hook in
+	# frappe/model/document.py), so a validate hook would fire after core
+	# Timesheet.validate() has already run calculate_hours -> update_billing_hours,
+	# and the corrected flag would never reach the billing computation.
+	#
+	# Rows with no task (plain activity logging) keep their manual checkbox.
+	for row in doc.time_logs:
+		if row.task:
+			row.is_billable = cint(frappe.db.get_value("Task", row.task, "custom_is_billable"))
 
 
 def validate_task_type(doc, method):
