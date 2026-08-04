@@ -12,6 +12,8 @@ from sigzenjira.sigzenjira.work_board import (
 	search_work_items,
 )
 
+from .test_status_cascade import make_task_under_story
+
 MEMBER_USER = "work_board_member@example.com"
 IDLE_USER = "work_board_idle@example.com"
 OUTSIDER_USER = "work_board_outsider@example.com"
@@ -68,6 +70,20 @@ def make_task(subject, work_item_type, project, parent_task=None, status="Open",
 	return doc
 
 
+def make_task_under(story, subject, status="Open", assignees=None):
+	# A Story's Tasks come only from its Task Split grid
+	# (custom/task.py:block_manual_task_under_story) - make_task above would
+	# throw for a "Task" landing straight under a Story, same class of bug
+	# fixed in test_status_cascade.py and friends. Layers assignee-writing on
+	# top of that module's make_task_under_story. expected_hours=1 is
+	# arbitrary but required - generate_tasks_from_split skips a row with no
+	# hours, so an ungenerated row would leave `task` unresolved below.
+	task = make_task_under_story(story, subject, expected_hours=1, status=status)
+	if assignees:
+		frappe.db.set_value("Task", task.name, "_assign", json.dumps(assignees), update_modified=False)
+	return task
+
+
 class TestWorkBoard(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
@@ -83,13 +99,9 @@ class TestWorkBoard(IntegrationTestCase):
 		cls.epic = make_task("WB Epic", "Epic", cls.project.name)
 		cls.story_a = make_task("WB Story A", "Story", cls.project.name, cls.epic.name)
 		cls.story_b = make_task("WB Story B", "Story", cls.project.name, cls.epic.name)
-		cls.task_a1 = make_task(
-			"WB Task A1", "Task", cls.project.name, cls.story_a.name, assignees=[cls.member]
-		)
-		cls.task_a2 = make_task("WB Task A2", "Task", cls.project.name, cls.story_a.name)
-		cls.task_b1 = make_task(
-			"WB Task B1", "Task", cls.project.name, cls.story_b.name, assignees=[cls.member]
-		)
+		cls.task_a1 = make_task_under(cls.story_a, "WB Task A1", assignees=[cls.member])
+		cls.task_a2 = make_task_under(cls.story_a, "WB Task A2")
+		cls.task_b1 = make_task_under(cls.story_b, "WB Task B1", assignees=[cls.member])
 		cls.sub_task = make_task("WB Sub-task", "Sub-task", cls.project.name, cls.task_a1.name)
 
 		cls.other_epic = make_task("WB Other Epic", "Epic", cls.other_project.name)
@@ -109,8 +121,8 @@ class TestWorkBoard(IntegrationTestCase):
 		board = get_project_board(self.project.name)
 		subjects = sorted(t["subject"] for t in board["tasks"])
 		# Task level only - Epics, Stories and Sub-tasks are never cards.
-		self.assertEqual(subjects, ["WB Task A1", "WB Task A2", "WB Task B1"])
-		self.assertEqual(board["context"], [])
+		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
+		self.assertEqual(board["path"], [])
 
 	def test_closed_tasks_are_never_cards(self):
 		for status in ("Completed", "Cancelled"):
@@ -124,19 +136,23 @@ class TestWorkBoard(IntegrationTestCase):
 				):
 					self.assertNotIn(self.task_a2.name, [t["name"] for t in board["tasks"]])
 
-	def test_range_keeps_only_tasks_with_an_ecd_inside_it(self):
+	def test_range_keeps_tasks_inside_it_and_every_undated_task(self):
 		today = frappe.utils.today()
 		# Mid-afternoon on purpose: exp_end_date is a Datetime, so the bounds have to
 		# cover the whole of the From and To days, not just midnight.
 		self.set_task(self.task_a1.name, exp_end_date=f"{today} 15:30:00")
 		self.set_task(self.task_a2.name, exp_end_date=frappe.utils.add_days(today, 40))
-		# task_b1 keeps a null ECD - an undated Task is never shown while the range is on.
+		# task_b1 keeps a null ECD - undated work is still work, so the range
+		# bounds the fetch without hiding it (_ecd_range_conditions).
 		board = get_project_board(
 			self.project.name,
 			from_date=frappe.utils.get_first_day(today),
 			to_date=frappe.utils.get_last_day(today),
 		)
-		self.assertEqual([t["name"] for t in board["tasks"]], [self.task_a1.name])
+		self.assertEqual(
+			sorted(t["name"] for t in board["tasks"]),
+			sorted([self.task_a1.name, self.task_b1.name]),
+		)
 
 	def test_range_never_narrows_a_picked_work_item(self):
 		today = frappe.utils.today()
@@ -148,31 +164,32 @@ class TestWorkBoard(IntegrationTestCase):
 			to_date=frappe.utils.get_last_day(today),
 		)
 		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, ["WB Task A1", "WB Task A2", "WB Task B1"])
+		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
 
 	def test_open_ended_range_uses_the_bound_it_was_given(self):
 		today = frappe.utils.today()
 		self.set_task(self.task_a1.name, exp_end_date=frappe.utils.add_days(today, -5))
 		self.set_task(self.task_a2.name, exp_end_date=frappe.utils.add_days(today, 5))
+
+		# task_b1 has no ECD and rides along with either open-ended bound.
 		self.assertEqual(
-			[t["name"] for t in get_project_board(self.project.name, from_date=today)["tasks"]],
-			[self.task_a2.name],
+			sorted(t["name"] for t in get_project_board(self.project.name, from_date=today)["tasks"]),
+			sorted([self.task_a2.name, self.task_b1.name]),
 		)
-		# task_b1 has no ECD - the open-ended bound must not sweep it in either.
 		self.assertEqual(
-			[t["name"] for t in get_project_board(self.project.name, to_date=today)["tasks"]],
-			[self.task_a1.name],
+			sorted(t["name"] for t in get_project_board(self.project.name, to_date=today)["tasks"]),
+			sorted([self.task_a1.name, self.task_b1.name]),
 		)
 
 	def test_epic_returns_only_task_level_descendants(self):
 		board = get_project_board(self.project.name, self.epic.name)
 		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, ["WB Task A1", "WB Task A2", "WB Task B1"])
+		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
 
 	def test_story_returns_only_its_own_tasks(self):
 		board = get_project_board(self.project.name, self.story_a.name)
 		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, ["WB Task A1", "WB Task A2"])
+		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject]))
 
 	def test_task_item_returns_itself_only(self):
 		board = get_project_board(self.project.name, self.task_a1.name)
@@ -189,13 +206,16 @@ class TestWorkBoard(IntegrationTestCase):
 		card = next(t for t in board["tasks"] if t["name"] == self.task_a1.name)
 		self.assertEqual([a["user"] for a in card["assignees"]], [self.member])
 
-	def test_story_context_carries_its_epic(self):
-		context = get_project_board(self.project.name, self.story_a.name)["context"]
-		self.assertEqual(
-			[(c["work_item_type"], c["name"]) for c in context],
-			[("Epic", self.epic.name), ("Story", self.story_a.name)],
-		)
-		self.assertTrue(all(c["status"] for c in context))
+	def test_story_board_path_carries_its_epic(self):
+		# path is the chain of names the client opens down to; the per-node
+		# detail the old `context` key carried now reaches the client through
+		# `epics` and `stories` instead.
+		board = get_project_board(self.project.name, self.story_a.name)
+
+		self.assertEqual(board["path"], [self.epic.name, self.story_a.name])
+		self.assertEqual([e["name"] for e in board["epics"]], [self.epic.name])
+		self.assertEqual([s["name"] for s in board["stories"]], [self.story_a.name])
+		self.assertTrue(all(s["status"] for s in board["stories"]))
 
 	def test_epic_board_carries_its_stories_with_status(self):
 		self.set_task(self.story_b.name, status="Completed")
@@ -215,16 +235,18 @@ class TestWorkBoard(IntegrationTestCase):
 		self.assertEqual(
 			{story: sorted(subjects) for story, subjects in by_story.items()},
 			{
-				self.story_a.name: ["WB Task A1", "WB Task A2"],
-				self.story_b.name: ["WB Task B1"],
+				self.story_a.name: sorted([self.task_a1.subject, self.task_a2.subject]),
+				self.story_b.name: [self.task_b1.subject],
 			},
 		)
 
-	def test_a_story_or_task_board_gets_no_stories_strip(self):
-		# Already one item deep - there is nothing left to group into lanes.
+	def test_a_story_or_task_board_lays_out_its_own_story(self):
+		# One item deep, the board still draws the Story the item belongs to -
+		# same nesting, one lane. It used to return an empty strip here.
 		for item in (self.story_a.name, self.task_a1.name):
 			with self.subTest(item=item):
-				self.assertEqual(get_project_board(self.project.name, item)["stories"], [])
+				stories = get_project_board(self.project.name, item)["stories"]
+				self.assertEqual([s["name"] for s in stories], [self.story_a.name])
 
 	def test_project_board_names_the_stories_and_epics_its_cards_sit_under(self):
 		# The client pools these cards until a tile is clicked, and then needs to
@@ -246,9 +268,8 @@ class TestWorkBoard(IntegrationTestCase):
 		finally:
 			self.set_task(self.task_b1.name, status="Open")
 
-	def test_epic_context_is_just_the_epic(self):
-		context = get_project_board(self.project.name, self.epic.name)["context"]
-		self.assertEqual([c["name"] for c in context], [self.epic.name])
+	def test_epic_board_path_is_just_the_epic(self):
+		self.assertEqual(get_project_board(self.project.name, self.epic.name)["path"], [self.epic.name])
 
 	def test_extra_fields_land_on_the_card(self):
 		board = get_project_board(
@@ -312,8 +333,15 @@ class TestWorkBoard(IntegrationTestCase):
 			search_work_items(self.project.name, "WB")
 
 	def test_search_work_items_matches_subject(self):
+		# Generated Tasks carry their Story's subject in their own (see
+		# generate_tasks_from_split's "{row.task_item} - {doc.subject}"), so a
+		# substring search for the Story's name also matches its Tasks - expected
+		# substring-search behavior, not a bug.
 		results = search_work_items(self.project.name, "Story A")
-		self.assertEqual([r["name"] for r in results], [self.story_a.name])
+		self.assertEqual(
+			sorted(r["name"] for r in results),
+			sorted([self.story_a.name, self.task_a1.name, self.task_a2.name]),
+		)
 
 	def test_search_spans_all_three_levels_and_excludes_sub_tasks(self):
 		results = search_work_items(self.project.name, "WB")
@@ -335,7 +363,10 @@ class TestWorkBoard(IntegrationTestCase):
 				self.project.name, self.epic.name, stat_type="Story", stat_status="Working"
 			)
 			self.assertEqual([s["name"] for s in board["stories"]], [self.story_a.name])
-			self.assertEqual(sorted(t["subject"] for t in board["tasks"]), ["WB Task A1", "WB Task A2"])
+			self.assertEqual(
+				sorted(t["subject"] for t in board["tasks"]),
+				sorted([self.task_a1.subject, self.task_a2.subject]),
+			)
 			# Counts stay project-wide, so the tile does not restate its own filter.
 			self.assertEqual(board["stats"]["Story"]["Working"], 1)
 		finally:
@@ -351,7 +382,9 @@ class TestWorkBoard(IntegrationTestCase):
 		board = get_project_board(
 			self.project.name, self.story_a.name, stat_type="Epic", stat_status="Working"
 		)
-		self.assertEqual(sorted(t["subject"] for t in board["tasks"]), ["WB Task A1", "WB Task A2"])
+		self.assertEqual(
+			sorted(t["subject"] for t in board["tasks"]), sorted([self.task_a1.subject, self.task_a2.subject])
+		)
 
 	def test_sub_task_cannot_be_a_board_root(self):
 		with self.assertRaises(frappe.ValidationError):
@@ -406,17 +439,8 @@ class TestWorkBoardDepartmentView(IntegrationTestCase):
 		cls.project = make_project("WB Dept Project", [cls.user])
 		cls.epic = make_task("WB Dept Epic", "Epic", cls.project.name)
 		cls.story = make_task("WB Dept Story", "Story", cls.project.name, cls.epic.name)
-		cls.open_task = make_task(
-			"WB Dept Open", "Task", cls.project.name, cls.story.name, assignees=[cls.user]
-		)
-		cls.done_task = make_task(
-			"WB Dept Done",
-			"Task",
-			cls.project.name,
-			cls.story.name,
-			status="Completed",
-			assignees=[cls.user],
-		)
+		cls.open_task = make_task_under(cls.story, "WB Dept Open", assignees=[cls.user])
+		cls.done_task = make_task_under(cls.story, "WB Dept Done", status="Completed", assignees=[cls.user])
 
 	def tearDown(self):
 		frappe.set_user("Administrator")

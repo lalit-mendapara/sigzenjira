@@ -15,6 +15,7 @@ def make_story(issue_name):
 			"custom_work_item_type": "Story",
 			"issue": issue.name,
 			"project": issue.project,
+			"custom_is_billable": issue.custom_is_billable,
 			"priority": ISSUE_PRIORITY_TO_TASK_PRIORITY.get(issue.priority, "Medium"),
 		}
 	)

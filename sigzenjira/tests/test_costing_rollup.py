@@ -2,7 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
-from .test_status_cascade import make_task
+from .test_status_cascade import make_task, make_task_under_story
 
 
 class TestCostingRollup(IntegrationTestCase):
@@ -31,10 +31,10 @@ class TestCostingRollup(IntegrationTestCase):
 			}
 		).insert()
 
-		epic = make_task("PH7 Costing Epic", "Epic", expected_time=20)
-		story = make_task("PH7 Costing Story", "Story", epic.name, expected_time=10)
-		task = make_task("PH7 Costing Task", "Task", story.name, expected_time=5)
-		sub_task = make_task("PH7 Costing Sub-task", "Sub-task", task.name)
+		epic = make_task("PH7 Costing Epic", "Epic", expected_time=20, is_billable=1)
+		story = make_task("PH7 Costing Story", "Story", epic.name, expected_time=10, is_billable=1)
+		task = make_task_under_story(story, "PH7 Costing Task", 5, is_billable=1)
+		sub_task = make_task("PH7 Costing Sub-task", "Sub-task", task.name, is_billable=1)
 
 		timesheet = frappe.get_doc(
 			{

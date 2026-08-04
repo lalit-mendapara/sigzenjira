@@ -6,8 +6,8 @@ app_email = "lalit@gmail.com"
 app_license = "mit"
 
 fixtures = [
-	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User"]]]},
-	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue"]]]},
+	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User", "Project", "Issue"]]]},
+	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue", "Timesheet Detail"]]]},
 	{
 		"doctype": "Report",
 		"filters": [
@@ -228,6 +228,11 @@ doc_events = {
 			"sigzenjira.custom.task.validate_hour_budget",
 			"sigzenjira.custom.task.validate_expected_time_edit_permission",
 			"sigzenjira.custom.task.sync_actual_extra_hours",
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
+			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+			"sigzenjira.custom.billable.validate_task_split_billable",
+			"sigzenjira.custom.billable.validate_split_row_unbilling",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
 		],
 		"on_update": [
 			"sigzenjira.custom.task.delete_tasks_for_removed_split_rows",
@@ -240,6 +245,21 @@ doc_events = {
 		],
 		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
 	},
+	"Project": {
+		# No validate_billable_under_billable_parent here: PARENT_SOURCES["Project"]
+		# is empty (Project is the root), so it would be an unconditional no-op.
+		"validate": [
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
+		],
+	},
+	"Issue": {
+		"validate": [
+			"sigzenjira.custom.billable.validate_billable_edit_permission",
+			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
+			"sigzenjira.custom.billable.validate_no_billable_dependants",
+		],
+	},
 	"ToDo": {
 		"before_insert": "sigzenjira.custom.todo.validate_task_assign_permission",
 		"after_insert": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
@@ -247,6 +267,7 @@ doc_events = {
 		"on_trash": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
 	},
 	"Timesheet": {
+		"before_validate": "sigzenjira.custom.timesheet.force_is_billable_from_task",
 		"validate": "sigzenjira.custom.timesheet.validate_task_type",
 		"on_submit": "sigzenjira.custom.timesheet.rollup_actual_time",
 		"on_cancel": "sigzenjira.custom.timesheet.rollup_actual_time",
@@ -362,4 +383,3 @@ doc_events = {
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
