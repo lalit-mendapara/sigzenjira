@@ -57,6 +57,10 @@ def _validate(filters):
 
 
 def _fetch_tree(project):
+	# Deliberately project-scoped, unlike recompute_actual_time's parent_task
+	# walk (which has no project filter): a client's hour statement must not
+	# carry another project's work, even if some cross-project parent/child
+	# pair exists that would make the stored Task.actual_time include it.
 	tasks = frappe.get_all("Task", filters={"project": project}, fields=TASK_FIELDS, order_by="name")
 	by_name = {task.name: task for task in tasks}
 
