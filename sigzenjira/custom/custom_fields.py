@@ -61,7 +61,6 @@ def get_custom_fields():
 				"fieldtype": "Check",
 				"insert_after": "custom_work_item_type",
 				"default": "0",
-				"description": "Time logged against this item is billable. Cannot be checked unless every parent it declares is billable.",
 			},
 			{
 				"fieldname": "custom_extra_hours",
