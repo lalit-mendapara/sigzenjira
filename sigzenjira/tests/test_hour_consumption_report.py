@@ -1,6 +1,6 @@
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import today
+from frappe.utils import add_days, today
 
 from sigzenjira.sigzenjira.report.project_hour_consumption.project_hour_consumption import execute
 
@@ -267,3 +267,79 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 			{"project": self.project.name, "story": second_story.name}
 		)
 		self.assertIn(stray.name, rows_by_work_item(data))
+
+
+class TestHourConsumptionReportDateRange(IntegrationTestCase):
+	def setUp(self):
+		self.project = make_billable_project("HCR Dates Project")
+		self.employee = make_employee("HCR Dates Tester")
+
+		self.epic = make_task("HCR Dates Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1)
+		self.story = make_task(
+			"HCR Dates Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+		)
+		self.task = make_task_under_story(self.story, "HCR Dated", 5, is_billable=1)
+
+		self.old_day = add_days(today(), -10)
+		log_hours(self.employee, self.task.name, 6, self.old_day)
+		log_hours(self.employee, self.task.name, 2, today())
+
+	def test_range_excludes_out_of_range_hours_and_parents_shrink(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "from_date": today(), "to_date": today()}
+		)
+		rows = rows_by_work_item(data)
+
+		self.assertEqual(rows[self.task.name]["actual_time"], 2)
+		# The range must apply before the rollup, not after.
+		self.assertEqual(rows[self.epic.name]["actual_time"], 2)
+
+	def test_from_date_alone_means_since(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "from_date": today()}
+		)
+		self.assertEqual(rows_by_work_item(data)[self.task.name]["actual_time"], 2)
+
+	def test_to_date_alone_means_up_to(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "to_date": self.old_day}
+		)
+		self.assertEqual(rows_by_work_item(data)[self.task.name]["actual_time"], 6)
+
+	def test_to_date_includes_work_logged_late_that_day(self):
+		# from_time is a datetime, so `from_time <= to_date` would silently drop
+		# everything logged after midnight on the last day of the range.
+		late = frappe.get_doc(
+			{
+				"doctype": "Timesheet",
+				"employee": self.employee.name,
+				"time_logs": [
+					{
+						"activity_type": "Execution",
+						"task": self.task.name,
+						"from_time": f"{today()} 22:30:00",
+						"hours": 1,
+						"is_billable": 1,
+					}
+				],
+			}
+		).insert()
+		late.submit()
+
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "from_date": today(), "to_date": today()}
+		)
+		self.assertEqual(rows_by_work_item(data)[self.task.name]["actual_time"], 3)
+
+	def test_expected_time_is_not_date_scoped(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "from_date": today(), "to_date": today()}
+		)
+		# Estimates have no date dimension - they stay whole-life, which is why
+		# the report carries a banner saying so (see the message test).
+		# Story.expected_time is 5, not the 10 passed to make_task: setUp's
+		# single make_task_under_story call appends one custom_task_split row
+		# with expected_hours=5, and rollup_story_expected_time (task.py:303)
+		# overwrites expected_time with the split-row sum as soon as any split
+		# row exists.
+		self.assertEqual(rows_by_work_item(data)[self.story.name]["expected_time"], 5)

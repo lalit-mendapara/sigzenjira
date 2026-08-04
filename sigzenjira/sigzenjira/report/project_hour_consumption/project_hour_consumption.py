@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate
+from frappe.utils import add_days, cint, flt, getdate
 
 from sigzenjira.custom.permissions import user_is_project_member
 
@@ -100,6 +100,16 @@ def _direct_totals(task_names, filters):
 
 	conditions = ["docstatus = 1", "task in %(tasks)s"]
 	values = {"tasks": tuple(task_names)}
+
+	if filters.from_date:
+		conditions.append("from_time >= %(from_date)s")
+		values["from_date"] = getdate(filters.from_date)
+
+	if filters.to_date:
+		# from_time is a datetime: `<= to_date` would drop everything logged
+		# after midnight on the last day of the range.
+		conditions.append("from_time < %(to_date)s")
+		values["to_date"] = add_days(getdate(filters.to_date), 1)
 
 	rows = frappe.db.sql(
 		"""
