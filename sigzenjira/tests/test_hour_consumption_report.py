@@ -343,3 +343,54 @@ class TestHourConsumptionReportDateRange(IntegrationTestCase):
 		# overwrites expected_time with the split-row sum as soon as any split
 		# row exists.
 		self.assertEqual(rows_by_work_item(data)[self.story.name]["expected_time"], 5)
+
+
+class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
+	def setUp(self):
+		self.project = make_billable_project("HCR Billable Only Project")
+		self.employee = make_employee("HCR Billable Only Tester")
+
+		self.epic = make_task(
+			"HCR BO Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1
+		)
+		self.story = make_task(
+			"HCR BO Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+		)
+		self.billable_task = make_task_under_story(self.story, "HCR BO Billable", 5, is_billable=1)
+		self.non_billable_task = make_task_under_story(self.story, "HCR BO Non Billable", 5, is_billable=0)
+
+		log_hours(self.employee, self.billable_task.name, 4, today())
+		log_hours(self.employee, self.non_billable_task.name, 3, today())
+
+	def test_non_billable_rows_dropped_and_parents_shrink(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "billable_only": 1}
+		)
+		rows = rows_by_work_item(data)
+
+		self.assertNotIn(self.non_billable_task.name, rows)
+		self.assertIn(self.billable_task.name, rows)
+		# The Story's totals must cover only what is still on screen.
+		self.assertEqual(rows[self.story.name]["actual_time"], 4)
+		self.assertEqual(rows[self.story.name]["non_billable_hours"], 0)
+
+	def test_unset_shows_everything(self):
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		self.assertIn(self.non_billable_task.name, rows_by_work_item(data))
+
+	def test_billable_descendant_keeps_its_non_billable_ancestor(self):
+		# The one-way clamp forbids this state, so it should never occur - but a
+		# blanket "drop every non-billable node" would swallow billable hours if
+		# legacy data ever violated it.
+		frappe.db.set_value("Task", self.story.name, "custom_is_billable", 0)
+		frappe.db.commit()
+		try:
+			_columns, data, _message, _chart, _summary = execute(
+				{"project": self.project.name, "billable_only": 1}
+			)
+			rows = rows_by_work_item(data)
+			self.assertIn(self.story.name, rows)
+			self.assertIn(self.billable_task.name, rows)
+		finally:
+			frappe.db.set_value("Task", self.story.name, "custom_is_billable", 1)
+			frappe.db.commit()

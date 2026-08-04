@@ -22,6 +22,9 @@ def execute(filters=None):
 	by_name, children = _fetch_tree(filters.project)
 	roots = _roots(filters, by_name, children)
 
+	if cint(filters.billable_only):
+		roots = _prune(roots, children)
+
 	ordered = []
 	_emit(roots, children, 0, ordered, set())
 
@@ -80,6 +83,21 @@ def _roots(filters, by_name, children):
 		# _validate already proved the Story is in this project.
 		return [story] if story else []
 	return children.get(None, [])
+
+
+def _prune(nodes, children):
+	# Post-order: a node survives if it is billable itself, or if any
+	# descendant survived. The `or kept` half should never fire - the one-way
+	# clamp (custom/billable.py) forbids a billable child under a non-billable
+	# parent - but without it, legacy data violating the clamp would have its
+	# billable hours silently swallowed.
+	kept_nodes = []
+	for node in nodes:
+		kept_children = _prune(children.get(node.name, []), children)
+		children[node.name] = kept_children
+		if kept_children or cint(node.custom_is_billable):
+			kept_nodes.append(node)
+	return kept_nodes
 
 
 def _emit(nodes, children, indent, ordered, visited):
