@@ -178,6 +178,13 @@ function apply_task_template(frm) {
 				const split_row = frm.add_child("custom_task_split");
 				split_row.task_item = row.task_item;
 				split_row.description = row.description;
+				// Seed Billable the same way the grid's Add Row does. Not
+				// automatic: custom_task_split_add only fires from
+				// Grid.add_new_row, and frappe.model.add_child (what
+				// frm.add_child calls) triggers nothing - so without this a
+				// template applied to a billable Story would produce unticked
+				// rows and every Task it generated would silently not bill.
+				split_row.is_billable = cint(frm.doc.custom_is_billable);
 				added += 1;
 			});
 
