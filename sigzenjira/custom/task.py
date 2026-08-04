@@ -181,9 +181,9 @@ def validate_expected_time_edit_permission(doc, method):
 def sync_actual_extra_hours(doc, method):
 	# recompute_actual_time (custom/timesheet.py) covers the Timesheet-driven
 	# path via a raw db.set_value that bypasses validate(); this covers a plain
-	# doc.save() that only changes expected_time. Positive = over budget,
-	# negative = under - no floor at zero.
-	doc.custom_actual_extra_hours = flt(doc.actual_time) - flt(doc.expected_time)
+	# doc.save() that only changes expected_time. Overrun only - under budget
+	# reads as 0, never negative.
+	doc.custom_actual_extra_hours = max(flt(doc.actual_time) - flt(doc.expected_time), 0)
 
 
 def validate_task_split_expected_hours_permission(doc, method):

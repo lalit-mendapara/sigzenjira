@@ -9,6 +9,7 @@
  "engine": "InnoDB",
  "field_order": [
   "task",
+  "is_billable",
   "requested_by",
   "additional_hours_requested",
   "reason",
@@ -23,6 +24,14 @@
    "label": "Task",
    "options": "Task",
    "reqd": 1
+  },
+  {
+   "fetch_from": "task.custom_is_billable",
+   "fieldname": "is_billable",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Billable",
+   "read_only": 1
   },
   {
    "default": "__user",

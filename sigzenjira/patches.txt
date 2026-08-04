@@ -25,3 +25,6 @@ sigzenjira.patches.v0_0.widen_additional_hours_request_approval_role
 sigzenjira.patches.v0_0.backfill_task_split_actual_hours
 sigzenjira.patches.v0_0.add_work_board_shortcut
 sigzenjira.patches.v0_0.remove_all_kanban_boards
+sigzenjira.patches.v0_0.clamp_actual_extra_hours_at_zero
+sigzenjira.patches.v0_0.remove_planned_billable_hours_field
+sigzenjira.patches.v0_0.backfill_non_billable_hours

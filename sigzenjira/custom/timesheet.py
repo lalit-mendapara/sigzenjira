@@ -49,16 +49,17 @@ def recompute_actual_time(task_name):
 	if not task_name:
 		return
 
-	direct_hours, direct_costing, direct_billing = frappe.db.sql(
+	direct_hours, direct_costing, direct_billing, direct_billable = frappe.db.sql(
 		"""
-		select sum(hours), sum(base_costing_amount), sum(base_billing_amount)
+		select sum(hours), sum(base_costing_amount), sum(base_billing_amount), sum(billing_hours)
 		from `tabTimesheet Detail` where task = %s and docstatus = 1
 		""",
 		task_name,
 	)[0]
-	children_hours, children_costing, children_billing = frappe.db.sql(
+	children_hours, children_costing, children_billing, children_billable = frappe.db.sql(
 		"""
-		select sum(actual_time), sum(total_costing_amount), sum(total_billing_amount)
+		select sum(actual_time), sum(total_costing_amount), sum(total_billing_amount),
+			sum(custom_billable_hours)
 		from `tabTask` where parent_task = %s
 		""",
 		task_name,
@@ -78,9 +79,19 @@ def recompute_actual_time(task_name):
 			# shape as actual_time.
 			"total_costing_amount": flt(direct_costing) + flt(children_costing),
 			"total_billing_amount": flt(direct_billing) + flt(children_billing),
-			# Positive = over budget, negative = under. No floor at zero — that's
-			# the useful signal.
-			"custom_actual_extra_hours": actual_time - flt(expected_time),
+			# Core zeroes billing_hours when a Timesheet Detail row isn't
+			# billable (timesheet_detail.py:update_billing_hours) — same rollup
+			# shape as actual_time.
+			"custom_billable_hours": flt(direct_billable) + flt(children_billable),
+			# The remainder needs no rollup of its own: actual_time is every
+			# logged hour and custom_billable_hours the billed share, so the
+			# difference is the unbilled one at every level. It also picks up a
+			# row billed for fewer hours than were worked, which core allows
+			# (timesheet_detail.py:update_billing_hours only defaults
+			# billing_hours to hours when it is 0).
+			"custom_non_billable_hours": actual_time - (flt(direct_billable) + flt(children_billable)),
+			# Overrun only — under budget reads as 0, never negative.
+			"custom_actual_extra_hours": max(actual_time - flt(expected_time), 0),
 		},
 		update_modified=False,
 	)

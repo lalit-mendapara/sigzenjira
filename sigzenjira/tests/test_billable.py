@@ -58,6 +58,26 @@ class TestBillableFields(IntegrationTestCase):
 			self.assertEqual(meta_field.fieldtype, "Check")
 			self.assertEqual(meta_field.default, "0")
 
+	def test_additional_hours_request_shows_its_tasks_billable_flag(self):
+		# Read-only mirror for the approver - granting hours on billable work
+		# costs the customer money, so the flag has to be visible at approval
+		# time. fetch_from does the work; nothing here may write back.
+		meta_field = frappe.get_meta("Additional Hours Request").get_field("is_billable")
+		self.assertEqual(meta_field.fetch_from, "task.custom_is_billable")
+		self.assertEqual(meta_field.read_only, 1)
+
+		task = make_task("AHR billable mirror", "Task", project=make_project("AHR Billable Co", 1).name)
+		task.db_set("custom_is_billable", 1)
+		request = frappe.get_doc(
+			{
+				"doctype": "Additional Hours Request",
+				"task": task.name,
+				"additional_hours_requested": 2,
+				"reason": "Scope grew",
+			}
+		).insert()
+		self.assertEqual(request.is_billable, 1)
+
 	def test_task_split_has_is_billable_column(self):
 		meta_field = frappe.get_meta("Task Split").get_field("is_billable")
 		self.assertIsNotNone(meta_field)

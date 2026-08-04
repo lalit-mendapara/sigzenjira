@@ -49,8 +49,8 @@ class TestActualExtraHours(IntegrationTestCase):
 
 		timesheet.cancel()
 
-		# back to no hours logged: 0 actual - 5 expected = -5
-		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_actual_extra_hours"), -5)
+		# back to no hours logged: under budget clamps to 0, never negative
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_actual_extra_hours"), 0)
 
 	def test_plain_save_recomputes_when_expected_time_changes(self):
 		task = frappe.get_doc(
@@ -68,6 +68,18 @@ class TestActualExtraHours(IntegrationTestCase):
 		task.save()
 
 		self.assertEqual(task.custom_actual_extra_hours, 6)
+
+	def test_under_budget_plain_save_clamps_to_zero(self):
+		task = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "PH7 Extra Hours Under Budget Task",
+				"custom_work_item_type": "Task",
+				"expected_time": 10,
+			}
+		).insert()
+
+		self.assertEqual(task.custom_actual_extra_hours, 0)
 
 
 if __name__ == "__main__":

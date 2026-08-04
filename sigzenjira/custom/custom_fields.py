@@ -62,6 +62,36 @@ def get_custom_fields():
 				"default": "0",
 			},
 			{
+				# Sits above the Timeline section (insert_after "duration", the
+				# last field before sb_timeline) so logged billing is read before
+				# the dates, not buried under Costing.
+				"fieldname": "custom_billing_hours_section",
+				"label": "Task Billing Hours Details",
+				"fieldtype": "Section Break",
+				"insert_after": "duration",
+				"collapsible": 1,
+			},
+			{
+				"fieldname": "custom_billable_hours",
+				"label": "Billable Hours",
+				"fieldtype": "Float",
+				"insert_after": "custom_billing_hours_section",
+				"read_only": 1,
+				"no_copy": 1,
+				"depends_on": "eval:doc.custom_is_billable",
+			},
+			{
+				# The rest of actual_time: hours logged against work that was not
+				# billable when the Timesheet was submitted. No depends_on - a
+				# non-billable Task is exactly where this needs to be visible.
+				"fieldname": "custom_non_billable_hours",
+				"label": "Non Billable Hours",
+				"fieldtype": "Float",
+				"insert_after": "custom_billable_hours",
+				"read_only": 1,
+				"no_copy": 1,
+			},
+			{
 				"fieldname": "custom_extra_hours",
 				"label": "Extra Hours",
 				"fieldtype": "Float",
