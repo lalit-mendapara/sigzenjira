@@ -2,7 +2,9 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 
-def make_task(subject, work_item_type, parent_task=None, expected_time=0, status="Open", is_billable=0):
+def make_task(
+	subject, work_item_type, parent_task=None, expected_time=0, status="Open", is_billable=0, project=None
+):
 	doc = frappe.get_doc(
 		{
 			"doctype": "Task",
@@ -12,6 +14,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0, status
 			"expected_time": expected_time,
 			"status": status,
 			"custom_is_billable": is_billable,
+			"project": project,
 		}
 	)
 	doc.insert()
