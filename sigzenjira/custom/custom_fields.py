@@ -30,7 +30,6 @@ def get_custom_fields():
 				"fieldtype": "Check",
 				"insert_after": "is_active",
 				"default": "0",
-				"description": "Work under this Project can be billed to the customer. Nothing below a non-billable Project may be billable.",
 			},
 		],
 		"Issue": [
