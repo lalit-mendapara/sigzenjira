@@ -8,6 +8,7 @@ from .test_status_cascade import make_task, make_task_under_story
 
 REPORT_PO = "test_hcr_po@example.com"
 REPORT_OUTSIDER = "test_hcr_outsider@example.com"
+REPORT_MEMBER = "test_hcr_member@example.com"
 
 
 def ensure_user(email, first_name, roles):
@@ -25,23 +26,13 @@ def ensure_user(email, first_name, roles):
 
 
 def make_billable_project(name):
-	# Project autonames off `naming_series` (PROJ-####), not project_name, so
-	# the exists-check has to look up the docname via project_name - checking
-	# by `name` directly never matches and IntegrationTestCase only rolls back
-	# once per class, not per test, so a stale row from an earlier test method
-	# in this run would otherwise collide on project_name's unique constraint.
-	existing = frappe.db.exists("Project", {"project_name": name})
-	if existing:
-		# Frappe reverts a naming_series counter when the deleted doc was the
-		# last one minted with it (revert_series_if_last), so the Project
-		# recreated below gets this exact same docname back - any Tasks an
-		# earlier test method already created against it would otherwise leak
-		# straight into this method's tree query.
-		frappe.db.delete("Task", {"project": existing})
-		frappe.delete_doc("Project", existing, force=True, ignore_permissions=True)
-	return frappe.get_doc({"doctype": "Project", "project_name": name, "custom_is_billable": 1}).insert(
-		ignore_permissions=True
-	)
+	return frappe.get_doc(
+		{
+			"doctype": "Project",
+			"project_name": f"{name} {frappe.generate_hash(length=6)}",
+			"custom_is_billable": 1,
+		}
+	).insert(ignore_permissions=True)
 
 
 class TestHourConsumptionReportGuards(IntegrationTestCase):
@@ -280,6 +271,53 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		)
 		self.assertIn(stray.name, rows_by_work_item(data))
 
+	def test_cross_project_parent_becomes_a_root(self):
+		# _fetch_tree only ever queries Tasks for the filtered project, so a
+		# child whose parent_task lives elsewhere can't be walked to - the
+		# design spec says it must surface as a root rather than vanish.
+		# validate_hierarchy only checks the parent's work-item TYPE (a
+		# Sub-task needs a Task parent), never that project matches, and
+		# block_manual_task_under_story only restricts Task-under-Story - so a
+		# Sub-task under another project's Task is reachable through a normal
+		# save.
+		other = make_billable_project("HCR Tree Other Project")
+		other_epic = make_task("HCR Tree Other Epic", "Epic", project=other.name, is_billable=1)
+		other_story = make_task(
+			"HCR Tree Other Story",
+			"Story",
+			other_epic.name,
+			project=other.name,
+			expected_time=5,
+			is_billable=1,
+		)
+		other_task = make_task_under_story(other_story, "HCR Tree Other Task", 5, is_billable=1)
+
+		stray = make_task(
+			"HCR Cross Project Sub", "Sub-task", other_task.name, project=self.project.name, is_billable=1
+		)
+
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		rows = rows_by_work_item(data)
+
+		self.assertEqual(rows[stray.name]["indent"], 0)
+		self.assertEqual(rows[stray.name]["parent_task"], "")
+
+	def test_project_member_gets_rows(self):
+		# Every other access test uses a bypass role or a total outsider - a
+		# regression that denied a genuine Project User would still pass.
+		user = ensure_user(REPORT_MEMBER, "HCR Member", ["Projects User"])
+		project = frappe.get_doc("Project", self.project.name)
+		project.append("users", {"user": user})
+		project.save(ignore_permissions=True)
+
+		frappe.set_user(user)
+		try:
+			_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertTrue(data)
+
 
 class TestHourConsumptionReportDateRange(IntegrationTestCase):
 	def setUp(self):
@@ -407,7 +445,6 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 		# blanket "drop every non-billable node" would swallow billable hours if
 		# legacy data ever violated it.
 		frappe.db.set_value("Task", self.story.name, "custom_is_billable", 0)
-		frappe.db.commit()
 		try:
 			_columns, data, _message, _chart, _summary = execute(
 				{"project": self.project.name, "billable_only": 1}
@@ -417,7 +454,6 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 			self.assertIn(self.billable_task.name, rows)
 		finally:
 			frappe.db.set_value("Task", self.story.name, "custom_is_billable", 1)
-			frappe.db.commit()
 
 
 class TestHourConsumptionReportSummary(IntegrationTestCase):

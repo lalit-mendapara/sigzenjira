@@ -1,8 +1,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.custom.project_user import get_project_approvers, user_has_project_flag
 from sigzenjira.custom.permissions import user_is_project_member
+from sigzenjira.custom.project_user import get_project_approvers, user_has_project_flag
 
 FLAG_EMPLOYEE = "test_pu_helper_employee@example.com"
 FLAG_SYSMAN = "test_pu_helper_sysman@example.com"
