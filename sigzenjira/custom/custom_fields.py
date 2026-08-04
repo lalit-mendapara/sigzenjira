@@ -39,7 +39,6 @@ def get_custom_fields():
 				"fieldtype": "Check",
 				"insert_after": "project",
 				"default": "0",
-				"description": "Work done for this Issue can be billed. Defaults from the Project; uncheck for free support.",
 			},
 		],
 		"Task": [
