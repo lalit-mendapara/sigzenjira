@@ -39,9 +39,9 @@ def make_billable_project(name):
 		# straight into this method's tree query.
 		frappe.db.delete("Task", {"project": existing})
 		frappe.delete_doc("Project", existing, force=True, ignore_permissions=True)
-	return frappe.get_doc(
-		{"doctype": "Project", "project_name": name, "custom_is_billable": 1}
-	).insert(ignore_permissions=True)
+	return frappe.get_doc({"doctype": "Project", "project_name": name, "custom_is_billable": 1}).insert(
+		ignore_permissions=True
+	)
 
 
 class TestHourConsumptionReportGuards(IntegrationTestCase):
@@ -87,7 +87,7 @@ class TestHourConsumptionReportGuards(IntegrationTestCase):
 			frappe.set_user("Administrator")
 
 	def test_valid_filters_return_columns_and_no_rows(self):
-		columns, data, message, chart, summary = execute({"project": self.project.name})
+		columns, data, _message, _chart, _summary = execute({"project": self.project.name})
 		self.assertEqual(data, [])
 		self.assertEqual([c["fieldname"] for c in columns][:3], ["work_item", "subject", "work_item_type"])
 
@@ -168,9 +168,16 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 				}
 			).insert()
 
-		self.epic = make_task("HCR Tree Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1)
+		self.epic = make_task(
+			"HCR Tree Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1
+		)
 		self.story = make_task(
-			"HCR Tree Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+			"HCR Tree Story",
+			"Story",
+			self.epic.name,
+			project=self.project.name,
+			expected_time=10,
+			is_billable=1,
 		)
 		# A Story's Tasks may only come from its Task Split grid
 		# (custom/task.py:block_manual_task_under_story).
@@ -251,7 +258,12 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		# actually living under Story 2. A name-prefix query filtered on
 		# Story 2 would silently drop it; a parent_task walk finds it.
 		second_story = make_task(
-			"HCR Tree Story 2", "Story", self.epic.name, project=self.project.name, expected_time=4, is_billable=1
+			"HCR Tree Story 2",
+			"Story",
+			self.epic.name,
+			project=self.project.name,
+			expected_time=4,
+			is_billable=1,
 		)
 		second_task = make_task_under_story(second_story, "HCR Second", 4, is_billable=1)
 
@@ -274,9 +286,16 @@ class TestHourConsumptionReportDateRange(IntegrationTestCase):
 		self.project = make_billable_project("HCR Dates Project")
 		self.employee = make_employee("HCR Dates Tester")
 
-		self.epic = make_task("HCR Dates Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1)
+		self.epic = make_task(
+			"HCR Dates Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1
+		)
 		self.story = make_task(
-			"HCR Dates Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+			"HCR Dates Story",
+			"Story",
+			self.epic.name,
+			project=self.project.name,
+			expected_time=10,
+			is_billable=1,
 		)
 		self.task = make_task_under_story(self.story, "HCR Dated", 5, is_billable=1)
 
@@ -354,7 +373,12 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 			"HCR BO Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1
 		)
 		self.story = make_task(
-			"HCR BO Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+			"HCR BO Story",
+			"Story",
+			self.epic.name,
+			project=self.project.name,
+			expected_time=10,
+			is_billable=1,
 		)
 		self.billable_task = make_task_under_story(self.story, "HCR BO Billable", 5, is_billable=1)
 		self.non_billable_task = make_task_under_story(self.story, "HCR BO Non Billable", 5, is_billable=0)
@@ -394,3 +418,55 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 		finally:
 			frappe.db.set_value("Task", self.story.name, "custom_is_billable", 1)
 			frappe.db.commit()
+
+
+class TestHourConsumptionReportSummary(IntegrationTestCase):
+	def setUp(self):
+		self.project = make_billable_project("HCR Summary Project")
+		self.employee = make_employee("HCR Summary Tester")
+
+		self.epic_a = make_task(
+			"HCR Sum Epic A", "Epic", project=self.project.name, expected_time=20, is_billable=1
+		)
+		self.story_a = make_task(
+			"HCR Sum Story A",
+			"Story",
+			self.epic_a.name,
+			project=self.project.name,
+			expected_time=10,
+			is_billable=1,
+		)
+		self.task_a = make_task_under_story(self.story_a, "HCR Sum Task A", 5, is_billable=1)
+
+		self.epic_b = make_task(
+			"HCR Sum Epic B", "Epic", project=self.project.name, expected_time=8, is_billable=1
+		)
+
+		log_hours(self.employee, self.task_a.name, 4, today())
+
+	def test_summary_counts_roots_only(self):
+		_columns, data, _message, _chart, summary = execute({"project": self.project.name})
+		labels = {card["label"]: card["value"] for card in summary}
+
+		# Epic A, Story A and Task A each report 4 actual hours (the same hours,
+		# rolled up). Summing every row would give 12.
+		self.assertEqual(labels["Total Hours"], 4)
+		self.assertEqual(labels["Billable Hours"], 4)
+		self.assertEqual(labels["Non-Billable Hours"], 0)
+		self.assertEqual(len(data), 4)
+
+	def test_no_message_without_filters(self):
+		_columns, _data, message, _chart, _summary = execute({"project": self.project.name})
+		self.assertIsNone(message)
+
+	def test_date_filter_produces_caveat_banner(self):
+		_columns, _data, message, _chart, _summary = execute(
+			{"project": self.project.name, "from_date": today(), "to_date": today()}
+		)
+		self.assertIn("Est Hours and Variance cover the whole engagement", message)
+
+	def test_billable_only_produces_banner(self):
+		_columns, _data, message, _chart, _summary = execute(
+			{"project": self.project.name, "billable_only": 1}
+		)
+		self.assertIn("Non-billable work items are hidden", message)

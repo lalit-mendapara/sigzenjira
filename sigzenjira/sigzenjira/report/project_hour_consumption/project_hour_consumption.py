@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import add_days, cint, flt, getdate
+from frappe.utils import add_days, cint, flt, formatdate, getdate
 
 from sigzenjira.custom.permissions import user_is_project_member
 
@@ -34,7 +34,7 @@ def execute(filters=None):
 		_rollup(root, children, direct, totals, set())
 
 	data = [_row(task, totals, root_names={root.name for root in roots}) for task in ordered]
-	return _columns(), data, None, None, None
+	return _columns(), data, _message(filters), None, _summary(roots, totals)
 
 
 def _validate(filters):
@@ -179,6 +179,50 @@ def _row(task, totals, root_names):
 		"parent_task": "" if task.name in root_names else (task.parent_task or ""),
 		"indent": task.indent,
 	}
+
+
+def _summary(roots, totals):
+	hours = billable = amount = 0.0
+	# Roots only: an Epic row already contains its Stories' and Tasks' hours, so
+	# summing every row would count the same hour once per level.
+	for root in roots:
+		root_hours, root_billable, root_amount = totals.get(root.name, (0.0, 0.0, 0.0))
+		hours += root_hours
+		billable += root_billable
+		amount += root_amount
+
+	return [
+		{"value": hours, "label": _("Total Hours"), "datatype": "Float"},
+		{"value": billable, "label": _("Billable Hours"), "datatype": "Float"},
+		{"value": hours - billable, "label": _("Non-Billable Hours"), "datatype": "Float"},
+		{"value": amount, "label": _("Amount"), "datatype": "Currency"},
+	]
+
+
+def _message(filters):
+	parts = []
+
+	if filters.from_date or filters.to_date:
+		if filters.from_date and filters.to_date:
+			period = _("{0} to {1}").format(formatdate(filters.from_date), formatdate(filters.to_date))
+		elif filters.from_date:
+			period = _("on and after {0}").format(formatdate(filters.from_date))
+		else:
+			period = _("up to {0}").format(formatdate(filters.to_date))
+
+		# expected_time has no date dimension, so Variance in a dated view
+		# compares a slice of actuals against a whole-life estimate.
+		parts.append(
+			_(
+				"Hours, Billable, Non-Billable and Amount cover {0}. "
+				"Est Hours and Variance cover the whole engagement."
+			).format(period)
+		)
+
+	if cint(filters.billable_only):
+		parts.append(_("Non-billable work items are hidden; totals cover billable work only."))
+
+	return "<br>".join(parts) if parts else None
 
 
 def _columns():
