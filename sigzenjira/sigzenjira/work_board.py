@@ -8,7 +8,7 @@ from frappe.utils import getdate
 # Org-wide oversight: every project's board, plus the Department view. Director
 # sits here rather than in BOARD_ROLES-only because its remit is the whole org,
 # not a project it happens to be a member of.
-MANAGER_ROLES = {"Director", "Projects Manager", "System Manager"}
+MANAGER_ROLES = {"Director", "Product Owner", "Projects Manager", "System Manager"}
 # Who can open the board at all. Deliberately broad - it is not the gate that
 # decides what anyone SEES: _allowed_projects() scopes non-managers to the
 # Projects they are a Project User on, and a user on none gets an empty picker.

@@ -2,6 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from sigzenjira.custom.project_user import get_project_approvers, user_has_project_flag
+from sigzenjira.custom.permissions import user_is_project_member
 
 FLAG_EMPLOYEE = "test_pu_helper_employee@example.com"
 FLAG_SYSMAN = "test_pu_helper_sysman@example.com"
@@ -76,3 +77,27 @@ class TestProjectUserPermissionHelper(IntegrationTestCase):
 
 	def test_get_project_approvers_empty_for_no_project(self):
 		self.assertEqual(get_project_approvers(None), [])
+
+
+PO_USER = "test_pu_helper_po@example.com"
+
+
+class TestProjectScopeBypass(IntegrationTestCase):
+	def test_product_owner_bypasses_project_scope(self):
+		# Product Owner is already privileged enough to set Billable and Work
+		# Item Type (WORK_ITEM_TYPE_PRIVILEGED_ROLES in custom/task.py); the
+		# bypass set is being brought in line with that.
+		if not frappe.db.exists("Role", "Product Owner"):
+			frappe.get_doc({"doctype": "Role", "role_name": "Product Owner"}).insert(ignore_permissions=True)
+
+		user = ensure_user(PO_USER, "PU Helper PO", ["Product Owner"])
+		project = make_project("PU Helper PO Project", [{"user": "Administrator"}])
+
+		# Not a Project User on it, and still sees it.
+		self.assertTrue(user_is_project_member(project.name, user=user))
+
+	def test_plain_employee_still_scoped(self):
+		# Guard against the bypass set being widened past what was asked for.
+		user = ensure_user(FLAG_EMPLOYEE, "PU Helper Employee", ["Employee"])
+		project = make_project("PU Helper Scoped Project", [{"user": "Administrator"}])
+		self.assertFalse(user_is_project_member(project.name, user=user))

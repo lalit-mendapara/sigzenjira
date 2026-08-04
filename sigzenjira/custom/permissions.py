@@ -5,7 +5,7 @@ import frappe
 # Kept in step with MANAGER_ROLES in sigzenjira/work_board.py on purpose: a role
 # that gets every project's board would otherwise open a Task from it and be
 # refused by this hook.
-PROJECT_SCOPE_BYPASS_ROLES = {"Director", "Projects Manager", "System Manager"}
+PROJECT_SCOPE_BYPASS_ROLES = {"Director", "Product Owner", "Projects Manager", "System Manager"}
 
 
 def _bypasses_project_scope(user):
