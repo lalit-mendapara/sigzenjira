@@ -1,9 +1,10 @@
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import today
 
 from sigzenjira.sigzenjira.report.project_hour_consumption.project_hour_consumption import execute
 
-from .test_status_cascade import make_task
+from .test_status_cascade import make_task, make_task_under_story
 
 REPORT_PO = "test_hcr_po@example.com"
 REPORT_OUTSIDER = "test_hcr_outsider@example.com"
@@ -31,6 +32,12 @@ def make_billable_project(name):
 	# in this run would otherwise collide on project_name's unique constraint.
 	existing = frappe.db.exists("Project", {"project_name": name})
 	if existing:
+		# Frappe reverts a naming_series counter when the deleted doc was the
+		# last one minted with it (revert_series_if_last), so the Project
+		# recreated below gets this exact same docname back - any Tasks an
+		# earlier test method already created against it would otherwise leak
+		# straight into this method's tree query.
+		frappe.db.delete("Task", {"project": existing})
 		frappe.delete_doc("Project", existing, force=True, ignore_permissions=True)
 	return frappe.get_doc(
 		{"doctype": "Project", "project_name": name, "custom_is_billable": 1}
@@ -83,3 +90,180 @@ class TestHourConsumptionReportGuards(IntegrationTestCase):
 		columns, data, message, chart, summary = execute({"project": self.project.name})
 		self.assertEqual(data, [])
 		self.assertEqual([c["fieldname"] for c in columns][:3], ["work_item", "subject", "work_item_type"])
+
+
+def make_employee(first_name):
+	company = frappe.db.get_single_value("Global Defaults", "default_company")
+	return frappe.get_doc(
+		{
+			"doctype": "Employee",
+			# Activity Cost's own uniqueness check keys off employee_name, not the
+			# employee id (activity_cost.py:check_unique), and IntegrationTestCase
+			# only rolls back once per class - every test method's setUp calls
+			# make_employee with this same literal "HCR Tree Tester", so without a
+			# per-call suffix the second method's Activity Cost insert collides
+			# with the first method's leftover row for a different employee id.
+			"first_name": f"{first_name} {frappe.generate_hash(length=6)}",
+			"company": company,
+			"status": "Active",
+			"gender": "Male",
+			"date_of_birth": "1995-01-01",
+			"date_of_joining": "2024-01-01",
+		}
+	).insert()
+
+
+def log_hours(employee, task_name, hours, date, submit=True):
+	# Timesheet.validate_overlap rejects two rows for the same employee whose
+	# time windows overlap (timesheet.py:get_overlap_for, docstatus < 2) - every
+	# call in this suite logs against the same employee/date, so each entry has
+	# to start after whatever is already logged that day rather than always at
+	# a fixed 09:00.
+	last_end = frappe.db.sql(
+		"""
+		select max(td.to_time) from `tabTimesheet Detail` td
+		join `tabTimesheet` ts on ts.name = td.parent
+		where ts.employee = %s and ts.docstatus < 2 and date(td.from_time) = %s
+		""",
+		(employee.name, date),
+	)[0][0]
+	from_time = last_end or f"{date} 09:00:00"
+	timesheet = frappe.get_doc(
+		{
+			"doctype": "Timesheet",
+			"employee": employee.name,
+			"time_logs": [
+				{
+					"activity_type": "Execution",
+					"task": task_name,
+					"from_time": from_time,
+					"hours": hours,
+					"is_billable": 1,
+				}
+			],
+		}
+	).insert()
+	if submit:
+		timesheet.submit()
+	return timesheet
+
+
+def rows_by_work_item(data):
+	return {row["work_item"]: row for row in data}
+
+
+class TestHourConsumptionReportTree(IntegrationTestCase):
+	def setUp(self):
+		self.project = make_billable_project("HCR Tree Project")
+		self.employee = make_employee("HCR Tree Tester")
+
+		if not frappe.db.exists("Activity Cost", {"employee": self.employee.name}):
+			frappe.get_doc(
+				{
+					"doctype": "Activity Cost",
+					"employee": self.employee.name,
+					"activity_type": "Execution",
+					"costing_rate": 100,
+					"billing_rate": 150,
+				}
+			).insert()
+
+		self.epic = make_task("HCR Tree Epic", "Epic", project=self.project.name, expected_time=20, is_billable=1)
+		self.story = make_task(
+			"HCR Tree Story", "Story", self.epic.name, project=self.project.name, expected_time=10, is_billable=1
+		)
+		# A Story's Tasks may only come from its Task Split grid
+		# (custom/task.py:block_manual_task_under_story).
+		self.billable_task = make_task_under_story(self.story, "HCR Billable", 5, is_billable=1)
+		self.non_billable_task = make_task_under_story(self.story, "HCR Non Billable", 5, is_billable=0)
+
+		log_hours(self.employee, self.billable_task.name, 4, today())
+		log_hours(self.employee, self.non_billable_task.name, 3, today())
+
+	def test_rows_are_parent_before_child_with_indent(self):
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		order = [row["work_item"] for row in data]
+
+		self.assertEqual(order[0], self.epic.name)
+		self.assertEqual(order[1], self.story.name)
+		self.assertEqual(set(order[2:]), {self.billable_task.name, self.non_billable_task.name})
+
+		rows = rows_by_work_item(data)
+		self.assertEqual(rows[self.epic.name]["indent"], 0)
+		self.assertEqual(rows[self.story.name]["indent"], 1)
+		self.assertEqual(rows[self.billable_task.name]["indent"], 2)
+
+		# An emitted root must not point at a parent outside the emitted set,
+		# or the datatable hides it.
+		self.assertEqual(rows[self.epic.name]["parent_task"], "")
+
+	def test_hours_roll_up_and_split_billable(self):
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		rows = rows_by_work_item(data)
+
+		self.assertEqual(rows[self.epic.name]["actual_time"], 7)
+		self.assertEqual(rows[self.epic.name]["billable_hours"], 4)
+		self.assertEqual(rows[self.epic.name]["non_billable_hours"], 3)
+		# 4 billable hours * billing_rate 150
+		self.assertEqual(rows[self.epic.name]["billing_amount"], 600)
+
+		for row in data:
+			self.assertAlmostEqual(
+				row["billable_hours"] + row["non_billable_hours"], row["actual_time"], places=4
+			)
+
+	def test_matches_stored_rollup_when_undated(self):
+		# Read-time aggregation and recompute_actual_time's stored rollup must
+		# agree; a divergence is a rollup bug this report would surface.
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		rows = rows_by_work_item(data)
+		self.assertEqual(
+			rows[self.story.name]["actual_time"],
+			frappe.db.get_value("Task", self.story.name, "actual_time"),
+		)
+
+	def test_variance_is_signed(self):
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		rows = rows_by_work_item(data)
+		# Story: 10 expected, 7 actual - under budget must read negative, which
+		# Task.custom_actual_extra_hours (clamped at 0) could never show.
+		self.assertEqual(rows[self.story.name]["variance"], -3)
+
+	def test_draft_timesheets_excluded(self):
+		log_hours(self.employee, self.billable_task.name, 8, today(), submit=False)
+		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
+		rows = rows_by_work_item(data)
+		self.assertEqual(rows[self.billable_task.name]["actual_time"], 4)
+
+	def test_story_filter_returns_that_subtree_only(self):
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "story": self.story.name}
+		)
+		rows = rows_by_work_item(data)
+
+		self.assertNotIn(self.epic.name, rows)
+		self.assertEqual(rows[self.story.name]["indent"], 0)
+		self.assertEqual(rows[self.story.name]["parent_task"], "")
+
+	def test_reparented_task_still_appears(self):
+		# Names encode the hierarchy but reparenting deliberately does not
+		# rename, so this Sub-task keeps a name prefixed by Story 1 while
+		# actually living under Story 2. A name-prefix query filtered on
+		# Story 2 would silently drop it; a parent_task walk finds it.
+		second_story = make_task(
+			"HCR Tree Story 2", "Story", self.epic.name, project=self.project.name, expected_time=4, is_billable=1
+		)
+		second_task = make_task_under_story(second_story, "HCR Second", 4, is_billable=1)
+
+		stray = make_task(
+			"HCR Stray", "Sub-task", self.billable_task.name, project=self.project.name, is_billable=1
+		)
+		self.assertTrue(stray.name.startswith(self.billable_task.name))
+
+		stray.parent_task = second_task.name
+		stray.save()
+
+		_columns, data, _message, _chart, _summary = execute(
+			{"project": self.project.name, "story": second_story.name}
+		)
+		self.assertIn(stray.name, rows_by_work_item(data))
