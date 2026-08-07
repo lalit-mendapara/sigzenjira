@@ -283,30 +283,36 @@ def _current_steps(story_names):
 	if not rows:
 		return {}
 
-	open_status = dict(
-		frappe.get_all(
+	open_tasks = {
+		task["name"]: task
+		for task in frappe.get_all(
 			"Task",
 			filters={
 				"name": ["in", [r.generated_task for r in rows]],
 				"status": ["in", OPEN_STATUSES],
 			},
-			fields=["name", "status"],
-			as_list=True,
+			fields=["name", "status", "_assign"],
 		)
-	)
+	}
+	# Resolved here rather than off get_project_board's `info`: the step's Task is
+	# not always a card (the ECD range and the Story selection both bound the
+	# kanban but not this), so its assignee can be absent from that map.
+	names = _user_info({user for task in open_tasks.values() for user in _assignees(task)})
 
 	steps = {}
 	for row in rows:
 		# OPEN_STATUSES already excludes Completed/Cancelled, so a Task missing
-		# from open_status IS the skip - the same rule the rest of the board runs
+		# from open_tasks IS the skip - the same rule the rest of the board runs
 		# on, and it covers a deleted generated_task for free.
-		if row.parent in steps or row.generated_task not in open_status:
+		task = open_tasks.get(row.generated_task)
+		if row.parent in steps or not task:
 			continue
 		steps[row.parent] = {
 			"idx": row.idx,
 			"task_item": row.task_item,
 			"task": row.generated_task,
-			"status": open_status[row.generated_task],
+			"status": task["status"],
+			"assignees": [(names.get(user) or {}).get("full_name", user) for user in _assignees(task)],
 		}
 	return steps
 

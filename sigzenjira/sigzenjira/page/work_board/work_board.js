@@ -562,12 +562,21 @@ class WorkBoard {
 	chip_step(step) {
 		if (!step) return "";
 		const color = status_color(step.status);
+		// Full names, comma-joined - a step Task usually has one assignee, and the
+		// several-assignee case is rare enough not to earn avatars here.
+		const who = (step.assignees || []).join(", ");
+		const assignees = who
+			? `<span class="wb-step-who" title="${frappe.utils.escape_html(who)}">${frappe.utils.escape_html(
+					who
+			  )}</span>`
+			: "";
 		return `<div class="wb-chip-step">
 			<span class="wb-step-seq">${step.idx}.</span>
 			<span class="wb-step-item" title="${frappe.utils.escape_html(step.task_item || "")}">${frappe.utils.escape_html(
 			step.task_item || ""
 		)}</span>
 			<span class="wb-pill wb-pill-${color}">${__(step.status)}</span>
+			${assignees}
 			<span class="wb-step-id" data-task="${frappe.utils.escape_html(step.task)}"
 				title="${__("Open")}">${frappe.utils.escape_html(step.task)}</span>
 		</div>`;

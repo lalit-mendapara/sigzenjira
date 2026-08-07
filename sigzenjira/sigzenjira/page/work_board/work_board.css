@@ -218,10 +218,19 @@
 	font-variant-numeric: tabular-nums;
 }
 
-.wb-step-item {
+.wb-step-item,
+.wb-step-who {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* The task item is what the step IS, so it gives up width first when the chip
+   is tight; the assignee holds its own. */
+.wb-step-who {
+	flex-shrink: 0;
+	max-width: 9rem;
+	color: var(--text-light, var(--text-muted));
 }
 
 .wb-chip-subject {
