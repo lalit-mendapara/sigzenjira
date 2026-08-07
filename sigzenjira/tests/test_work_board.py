@@ -3,13 +3,13 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.sigzenjira.work_board import (
+from sigzenjira.sigzenjira.page.work_board.work_board import (
 	card_field_options,
 	get_bootstrap,
 	get_department_board,
 	get_project_board,
 	save_card_fields,
-	search_work_items,
+	set_task_status,
 )
 
 from .test_status_cascade import make_task_under_story
@@ -46,35 +46,40 @@ def make_project(name, users):
 			"doctype": "Project",
 			"project_name": name,
 			"status": "Open",
+			# Mandatory on this bench (pulse_sigzen), so a fresh Project can't be
+			# inserted without it - the value itself is immaterial to the board.
+			"project_type": "Internal",
 			"users": [{"user": user} for user in users],
 		}
 	).insert(ignore_permissions=True)
 
 
-def make_task(subject, work_item_type, project, parent_task=None, status="Open", assignees=None):
+def make_task(
+	subject, work_item_type, project, parent_task=None, status="Open", assignees=None, expected_time=0
+):
 	doc = frappe.get_doc(
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"project": project,
 			"parent_task": parent_task,
 			"status": status,
+			"expected_time": expected_time,
 		}
 	).insert()
 	if assignees:
 		# Written straight to _assign: the board only ever reads this field, and
 		# going through assign_to.add would drag in the ToDo assign-permission
-		# gate (custom/todo.py), which is not what these tests cover.
+		# gate (events/todo.py), which is not what these tests cover.
 		frappe.db.set_value("Task", doc.name, "_assign", json.dumps(assignees), update_modified=False)
 	return doc
 
 
 def make_task_under(story, subject, status="Open", assignees=None):
-	# A Story's Tasks come only from its Task Split grid
-	# (custom/task.py:block_manual_task_under_story) - make_task above would
-	# throw for a "Task" landing straight under a Story, same class of bug
-	# fixed in test_status_cascade.py and friends. Layers assignee-writing on
+	# Builds the Task through the Story's Task Split grid, which is where a
+	# Story's Tasks normally come from - make_task above would leave the row to
+	# be mirrored in afterwards instead. Layers assignee-writing on
 	# top of that module's make_task_under_story. expected_hours=1 is
 	# arbitrary but required - generate_tasks_from_split skips a row with no
 	# hours, so an ungenerated row would leave `task` unresolved below.
@@ -96,9 +101,15 @@ class TestWorkBoard(IntegrationTestCase):
 		cls.project = make_project("WB Board Project", [cls.member, cls.idle])
 		cls.other_project = make_project("WB Other Project", [cls.outsider])
 
-		cls.epic = make_task("WB Epic", "Epic", cls.project.name)
-		cls.story_a = make_task("WB Story A", "Story", cls.project.name, cls.epic.name)
-		cls.story_b = make_task("WB Story B", "Story", cls.project.name, cls.epic.name)
+		# Story hours are a ceiling for the rows added below
+		# (rollup_story_expected_time), so declare them up front.
+		cls.epic = make_task("WB Epic", "Epic", cls.project.name, expected_time=100)
+		cls.story_a = make_task(
+			"WB Story A", "Story", cls.project.name, cls.epic.name, expected_time=20
+		)
+		cls.story_b = make_task(
+			"WB Story B", "Story", cls.project.name, cls.epic.name, expected_time=20
+		)
 		cls.task_a1 = make_task_under(cls.story_a, "WB Task A1", assignees=[cls.member])
 		cls.task_a2 = make_task_under(cls.story_a, "WB Task A2")
 		cls.task_b1 = make_task_under(cls.story_b, "WB Task B1", assignees=[cls.member])
@@ -117,24 +128,67 @@ class TestWorkBoard(IntegrationTestCase):
 		frappe.db.set_value("Task", task, values)
 		self.addCleanup(frappe.db.set_value, "Task", task, before)
 
-	def test_no_item_and_no_range_returns_every_task_in_the_project(self):
+	def test_board_returns_every_open_task_in_the_project(self):
 		board = get_project_board(self.project.name)
 		subjects = sorted(t["subject"] for t in board["tasks"])
 		# Task level only - Epics, Stories and Sub-tasks are never cards.
 		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
-		self.assertEqual(board["path"], [])
 
 	def test_closed_tasks_are_never_cards(self):
 		for status in ("Completed", "Cancelled"):
 			with self.subTest(status=status):
 				self.set_task(self.task_a2.name, status=status)
-				for board in (
-					get_project_board(self.project.name),
-					get_project_board(self.project.name, self.epic.name),
-					get_project_board(self.project.name, self.story_a.name),
-					get_project_board(self.project.name, self.task_a2.name),
-				):
-					self.assertNotIn(self.task_a2.name, [t["name"] for t in board["tasks"]])
+				board = get_project_board(self.project.name)
+				self.assertNotIn(self.task_a2.name, [t["name"] for t in board["tasks"]])
+
+	def test_rows_list_the_projects_open_epics_and_stories(self):
+		board = get_project_board(self.project.name)
+		self.assertEqual([e["name"] for e in board["epics"]], [self.epic.name])
+		self.assertEqual(
+			[s["name"] for s in board["stories"]], [self.story_a.name, self.story_b.name]
+		)
+		# Every chip carries the status it renders.
+		self.assertTrue(all(row["status"] for row in board["epics"] + board["stories"]))
+
+	def test_closed_work_items_leave_the_rows(self):
+		# The rows are "what is still on the line" - same rule as the cards.
+		for item, key in ((self.epic.name, "epics"), (self.story_b.name, "stories")):
+			for status in ("Completed", "Cancelled"):
+				with self.subTest(item=item, status=status):
+					self.set_task(item, status=status)
+					names = [row["name"] for row in get_project_board(self.project.name)[key]]
+					self.assertNotIn(item, names)
+
+	def test_story_row_names_the_epic_it_hangs_off(self):
+		# The client groups the Story row by this, so an Epic selection can narrow it.
+		stories = get_project_board(self.project.name)["stories"]
+		self.assertEqual({s["epic"] for s in stories}, {self.epic.name})
+
+	def test_selected_stories_narrow_the_cards(self):
+		board = get_project_board(self.project.name, stories=json.dumps([self.story_a.name]))
+		self.assertEqual(
+			sorted(t["subject"] for t in board["tasks"]),
+			sorted([self.task_a1.subject, self.task_a2.subject]),
+		)
+		# The rows themselves stay whole - the selection filters below it, not itself.
+		self.assertEqual(len(board["stories"]), 2)
+
+	def test_an_empty_selection_empties_the_kanban(self):
+		# What a picked Epic with no open Story under it resolves to. Not the same as
+		# no selection at all, which shows the whole project.
+		self.assertEqual(get_project_board(self.project.name, stories=json.dumps([]))["tasks"], [])
+		self.assertEqual(len(get_project_board(self.project.name)["tasks"]), 3)
+
+	def test_a_selection_ignores_the_date_range(self):
+		today = frappe.utils.today()
+		self.set_task(self.task_a1.name, exp_end_date=frappe.utils.add_days(today, 400))
+		board = get_project_board(
+			self.project.name,
+			stories=json.dumps([self.story_a.name]),
+			from_date=frappe.utils.get_first_day(today),
+			to_date=frappe.utils.get_last_day(today),
+		)
+		self.assertIn(self.task_a1.name, [t["name"] for t in board["tasks"]])
 
 	def test_range_keeps_tasks_inside_it_and_every_undated_task(self):
 		today = frappe.utils.today()
@@ -154,18 +208,6 @@ class TestWorkBoard(IntegrationTestCase):
 			sorted([self.task_a1.name, self.task_b1.name]),
 		)
 
-	def test_range_never_narrows_a_picked_work_item(self):
-		today = frappe.utils.today()
-		self.set_task(self.task_a1.name, exp_end_date=frappe.utils.add_days(today, 400))
-		board = get_project_board(
-			self.project.name,
-			self.epic.name,
-			from_date=frappe.utils.get_first_day(today),
-			to_date=frappe.utils.get_last_day(today),
-		)
-		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
-
 	def test_open_ended_range_uses_the_bound_it_was_given(self):
 		today = frappe.utils.today()
 		self.set_task(self.task_a1.name, exp_end_date=frappe.utils.add_days(today, -5))
@@ -181,54 +223,24 @@ class TestWorkBoard(IntegrationTestCase):
 			sorted([self.task_a1.name, self.task_b1.name]),
 		)
 
-	def test_epic_returns_only_task_level_descendants(self):
-		board = get_project_board(self.project.name, self.epic.name)
-		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject, self.task_b1.subject]))
-
-	def test_story_returns_only_its_own_tasks(self):
-		board = get_project_board(self.project.name, self.story_a.name)
-		subjects = sorted(t["subject"] for t in board["tasks"])
-		self.assertEqual(subjects, sorted([self.task_a1.subject, self.task_a2.subject]))
-
-	def test_task_item_returns_itself_only(self):
-		board = get_project_board(self.project.name, self.task_a1.name)
-		self.assertEqual([t["name"] for t in board["tasks"]], [self.task_a1.name])
+	def test_sub_tasks_are_never_cards(self):
+		# cascade_completion_to_parent already rolls a Sub-task into its Task.
+		names = [t["name"] for t in get_project_board(self.project.name)["tasks"]]
+		self.assertNotIn(self.sub_task.name, names)
 
 	def test_members_include_project_user_with_no_tasks(self):
-		board = get_project_board(self.project.name, self.epic.name)
+		board = get_project_board(self.project.name)
 		users = [m["user"] for m in board["members"]]
 		self.assertIn(self.idle, users)
 		self.assertIn(self.member, users)
 
 	def test_assignees_resolved_on_cards(self):
-		board = get_project_board(self.project.name, self.epic.name)
+		board = get_project_board(self.project.name)
 		card = next(t for t in board["tasks"] if t["name"] == self.task_a1.name)
 		self.assertEqual([a["user"] for a in card["assignees"]], [self.member])
 
-	def test_story_board_path_carries_its_epic(self):
-		# path is the chain of names the client opens down to; the per-node
-		# detail the old `context` key carried now reaches the client through
-		# `epics` and `stories` instead.
-		board = get_project_board(self.project.name, self.story_a.name)
-
-		self.assertEqual(board["path"], [self.epic.name, self.story_a.name])
-		self.assertEqual([e["name"] for e in board["epics"]], [self.epic.name])
-		self.assertEqual([s["name"] for s in board["stories"]], [self.story_a.name])
-		self.assertTrue(all(s["status"] for s in board["stories"]))
-
-	def test_epic_board_carries_its_stories_with_status(self):
-		self.set_task(self.story_b.name, status="Completed")
-		board = get_project_board(self.project.name, self.epic.name)
-		# Completed Stories keep their lane - it reports the Epic's progress, so
-		# dropping the finished ones would read as if they were never planned.
-		self.assertEqual(
-			[(s["name"], s["status"]) for s in board["stories"]],
-			[(self.story_a.name, "Open"), (self.story_b.name, "Completed")],
-		)
-
-	def test_cards_name_the_story_their_lane_groups_by(self):
-		cards = get_project_board(self.project.name, self.epic.name)["tasks"]
+	def test_cards_name_the_story_they_belong_to(self):
+		cards = get_project_board(self.project.name)["tasks"]
 		by_story = {}
 		for card in cards:
 			by_story.setdefault(card["parent_task"], []).append(card["subject"])
@@ -240,48 +252,14 @@ class TestWorkBoard(IntegrationTestCase):
 			},
 		)
 
-	def test_a_story_or_task_board_lays_out_its_own_story(self):
-		# One item deep, the board still draws the Story the item belongs to -
-		# same nesting, one lane. It used to return an empty strip here.
-		for item in (self.story_a.name, self.task_a1.name):
-			with self.subTest(item=item):
-				stories = get_project_board(self.project.name, item)["stories"]
-				self.assertEqual([s["name"] for s in stories], [self.story_a.name])
-
-	def test_project_board_names_the_stories_and_epics_its_cards_sit_under(self):
-		# The client pools these cards until a tile is clicked, and then needs to
-		# say which Stories (and whose Epic) the filtered board is showing.
-		stories = get_project_board(self.project.name)["stories"]
-		self.assertEqual(
-			sorted((s["name"], s["epic_subject"]) for s in stories),
-			sorted([(self.story_a.name, "WB Epic"), (self.story_b.name, "WB Epic")]),
-		)
-
-	def test_story_tile_keeps_a_matched_story_with_no_open_task(self):
-		# "Story Open" counted it, so the lane has to appear even empty - that
-		# emptiness is the answer to "which Stories are Open".
-		self.set_task(self.task_b1.name, status="Completed")
-		try:
-			board = get_project_board(self.project.name, stat_type="Story", stat_status="Open")
-			self.assertIn(self.story_b.name, [s["name"] for s in board["stories"]])
-			self.assertNotIn(self.task_b1.name, [t["name"] for t in board["tasks"]])
-		finally:
-			self.set_task(self.task_b1.name, status="Open")
-
-	def test_epic_board_path_is_just_the_epic(self):
-		self.assertEqual(get_project_board(self.project.name, self.epic.name)["path"], [self.epic.name])
-
 	def test_extra_fields_land_on_the_card(self):
-		board = get_project_board(
-			self.project.name, self.story_a.name, extra_fields=json.dumps(["expected_time"])
-		)
+		board = get_project_board(self.project.name, extra_fields=json.dumps(["expected_time"]))
 		self.assertEqual(board["extra_fields"], ["expected_time"])
 		self.assertIn("expected_time", board["tasks"][0]["extra"])
 
 	def test_unknown_extra_field_is_dropped_not_queried(self):
 		board = get_project_board(
 			self.project.name,
-			self.story_a.name,
 			extra_fields=json.dumps(["expected_time", "modified_by", "(select 1)"]),
 		)
 		# modified_by is not a docfield and the third entry is a SQL-shaped
@@ -305,18 +283,19 @@ class TestWorkBoard(IntegrationTestCase):
 		settings = json.loads(get_user_settings("Task"))
 		self.assertEqual(settings["work_board_card_fields"], ["expected_time"])
 
-	def test_item_from_another_project_is_rejected(self):
-		with self.assertRaises(frappe.ValidationError):
-			get_project_board(self.project.name, self.other_epic.name)
+	def test_another_projects_story_cannot_pull_its_tasks_in(self):
+		# The project filter is what keeps a hand-crafted selection honest.
+		board = get_project_board(self.project.name, stories=json.dumps([self.other_epic.name]))
+		self.assertEqual(board["tasks"], [])
 
 	def test_non_member_cannot_open_a_project_board(self):
 		frappe.set_user(self.outsider)
 		with self.assertRaises(frappe.PermissionError):
-			get_project_board(self.project.name, self.epic.name)
+			get_project_board(self.project.name)
 
 	def test_member_sees_whole_project_not_just_own_tasks(self):
 		frappe.set_user(self.idle)
-		board = get_project_board(self.project.name, self.epic.name)
+		board = get_project_board(self.project.name)
 		# `idle` has no assignment at all - project-scoped visibility, not
 		# own-tasks-only, so the full task set still comes back.
 		self.assertEqual(len(board["tasks"]), 3)
@@ -327,68 +306,29 @@ class TestWorkBoard(IntegrationTestCase):
 		self.assertIn(self.other_project.name, names)
 		self.assertNotIn(self.project.name, names)
 
-	def test_search_work_items_is_project_scoped(self):
+	def test_dropping_a_card_writes_the_columns_status(self):
+		self.set_task(self.task_a2.name, status="Open")
+		for column, status in (("In Progress", "Working"), ("In Review", "Pending Review"), ("To Do", "Open")):
+			with self.subTest(column=column):
+				self.assertEqual(set_task_status(self.task_a2.name, column), status)
+				self.assertEqual(frappe.db.get_value("Task", self.task_a2.name, "status"), status)
+
+	def test_an_unknown_column_is_refused(self):
+		# The column name is client-supplied, so it must never reach doc.status raw.
+		self.set_task(self.task_a2.name, status="Open")
+		with self.assertRaises(frappe.ValidationError):
+			set_task_status(self.task_a2.name, "Completed")
+		self.assertEqual(frappe.db.get_value("Task", self.task_a2.name, "status"), "Open")
+
+	def test_a_non_member_cannot_move_a_card(self):
+		# Reading the board is already blocked for an outsider; the write is a
+		# separate endpoint and needs its own gate, not the read one.
+		self.set_task(self.task_a2.name, status="Open")
 		frappe.set_user(self.outsider)
 		with self.assertRaises(frappe.PermissionError):
-			search_work_items(self.project.name, "WB")
-
-	def test_search_work_items_matches_subject(self):
-		# Generated Tasks carry their Story's subject in their own (see
-		# generate_tasks_from_split's "{row.task_item} - {doc.subject}"), so a
-		# substring search for the Story's name also matches its Tasks - expected
-		# substring-search behavior, not a bug.
-		results = search_work_items(self.project.name, "Story A")
-		self.assertEqual(
-			sorted(r["name"] for r in results),
-			sorted([self.story_a.name, self.task_a1.name, self.task_a2.name]),
-		)
-
-	def test_search_spans_all_three_levels_and_excludes_sub_tasks(self):
-		results = search_work_items(self.project.name, "WB")
-		types = {r["work_item_type"] for r in results}
-		self.assertEqual(types, {"Epic", "Story", "Task"})
-		self.assertNotIn(self.sub_task.name, [r["name"] for r in results])
-
-	def test_stats_count_project_epics_and_stories(self):
-		stats = get_project_board(self.project.name, self.epic.name)["stats"]
-		# 1 Open Epic, 2 Open Stories in this project's fixtures.
-		self.assertEqual(stats["Epic"]["Open"], 1)
-		self.assertEqual(stats["Story"]["Open"], 2)
-		self.assertEqual(stats["Story"]["Working"], 0)
-
-	def test_story_stat_filter_narrows_lanes_and_cards(self):
-		frappe.db.set_value("Task", self.story_a.name, "status", "Working")
-		try:
-			board = get_project_board(
-				self.project.name, self.epic.name, stat_type="Story", stat_status="Working"
-			)
-			self.assertEqual([s["name"] for s in board["stories"]], [self.story_a.name])
-			self.assertEqual(
-				sorted(t["subject"] for t in board["tasks"]),
-				sorted([self.task_a1.subject, self.task_a2.subject]),
-			)
-			# Counts stay project-wide, so the tile does not restate its own filter.
-			self.assertEqual(board["stats"]["Story"]["Working"], 1)
-		finally:
-			frappe.db.set_value("Task", self.story_a.name, "status", "Open")
-
-	def test_epic_stat_filter_matching_nothing_empties_the_board(self):
-		board = get_project_board(self.project.name, self.epic.name, stat_type="Epic", stat_status="Working")
-		# The one Epic is Open, so an "Epic Working" tile matches no Story at all.
-		self.assertEqual(board["stories"], [])
-		self.assertEqual(board["tasks"], [])
-
-	def test_stat_filter_ignored_on_a_story_board(self):
-		board = get_project_board(
-			self.project.name, self.story_a.name, stat_type="Epic", stat_status="Working"
-		)
-		self.assertEqual(
-			sorted(t["subject"] for t in board["tasks"]), sorted([self.task_a1.subject, self.task_a2.subject])
-		)
-
-	def test_sub_task_cannot_be_a_board_root(self):
-		with self.assertRaises(frappe.ValidationError):
-			get_project_board(self.project.name, self.sub_task.name)
+			set_task_status(self.task_a2.name, "In Progress")
+		frappe.set_user("Administrator")
+		self.assertEqual(frappe.db.get_value("Task", self.task_a2.name, "status"), "Open")
 
 
 class TestWorkBoardDepartmentView(IntegrationTestCase):
@@ -437,8 +377,10 @@ class TestWorkBoardDepartmentView(IntegrationTestCase):
 			)
 
 		cls.project = make_project("WB Dept Project", [cls.user])
-		cls.epic = make_task("WB Dept Epic", "Epic", cls.project.name)
-		cls.story = make_task("WB Dept Story", "Story", cls.project.name, cls.epic.name)
+		cls.epic = make_task("WB Dept Epic", "Epic", cls.project.name, expected_time=100)
+		cls.story = make_task(
+			"WB Dept Story", "Story", cls.project.name, cls.epic.name, expected_time=20
+		)
 		cls.open_task = make_task_under(cls.story, "WB Dept Open", assignees=[cls.user])
 		cls.done_task = make_task_under(cls.story, "WB Dept Done", status="Completed", assignees=[cls.user])
 

@@ -1,13 +1,5 @@
 // apps/sigzenjira/sigzenjira/sigzenjira/page/work_board/work_board.js
-const API = "sigzenjira.sigzenjira.work_board";
-
-// The four counters over the board: Epic/Story x Open/Working.
-const STAT_TILES = [
-	{ type: "Epic", status: "Open", color: "gray" },
-	{ type: "Epic", status: "Working", color: "blue" },
-	{ type: "Story", status: "Open", color: "gray" },
-	{ type: "Story", status: "Working", color: "blue" },
-];
+const API = "sigzenjira.sigzenjira.page.work_board.work_board";
 
 // Completed and Cancelled Tasks never reach the board (see OPEN_STATUSES in
 // work_board.py), so there is no Done column for them to land in.
@@ -41,10 +33,9 @@ const is_overdue = (task) =>
 	task.status === "Overdue" ||
 	(task.exp_end_date && task.exp_end_date < frappe.datetime.get_today());
 
-// Cards only ever carry an open status, but the context strip shows the picked
-// item's Epic/Story ancestors, and those can be Completed or Cancelled.
-const status_color = (status) =>
-	COLUMN_COLOR[STATUS_COLUMN[status]] || (status === "Cancelled" ? "gray" : "green");
+// Nothing on the board carries a closed status any more (the server drops them
+// from every row), so the fallback only ever covers a status the map misses.
+const status_color = (status) => COLUMN_COLOR[STATUS_COLUMN[status]] || "green";
 
 frappe.pages["work-board"].on_page_load = (wrapper) => {
 	const page = frappe.ui.make_app_page({
@@ -75,20 +66,17 @@ class WorkBoard {
 		this.state = {
 			view: "project",
 			project: null,
-			item: null,
-			item_label: "",
 			department: null,
 			// Current month by default - bounds the first load. Both bounds are
-			// clearable; clearing them both means "no date limit".
+			// clearable; clearing them both means "no date limit". Only applies while
+			// nothing is picked in the Epic/Story rows.
 			from_date: frappe.datetime.month_start(),
 			to_date: frappe.datetime.month_end(),
 			employee_board_open: false,
-			// Active stat tile, e.g. {type: "Story", status: "Working"}.
-			stat_type: null,
-			stat_status: null,
-			// Overdue tile - a client-side filter on the loaded board, not a
-			// server one, so it stacks on top of whatever else is picked.
-			overdue_only: false,
+			// The Epic and Story rows are multi-select: each holds the names picked
+			// in it. Empty means "everything" rather than "nothing".
+			epics: new Set(),
+			stories: new Set(),
 		};
 		this.data = { tasks: [], members: [] };
 		// Answered by get_bootstrap; false until it lands so a render that beats
@@ -161,12 +149,6 @@ class WorkBoard {
 						<label for="wb-project">${__("Project")}</label>
 						<select id="wb-project" class="form-control wb-project"></select>
 					</div>
-					<div class="wb-field wb-search-field">
-						<label for="wb-item">${__("Work Item")}</label>
-						<input type="text" id="wb-item" class="form-control wb-item" autocomplete="off"
-							placeholder="${__("None - all tasks in the project")}" disabled>
-						<div class="wb-search-results"></div>
-					</div>
 					<div class="wb-field wb-range-field">
 						<label for="wb-from-date">${__("Start Date")}</label>
 						<input type="date" id="wb-from-date" class="form-control wb-from-date">
@@ -215,24 +197,20 @@ class WorkBoard {
 			this.$layout
 				.find(".wb-department-controls")
 				.toggleClass("hidden", view !== "department");
-			this.hide_results();
 			// Both views share this.data - rendering straight away would draw the
-			// new view over the other one's tasks (and without its stats).
+			// new view over the other one's tasks.
 			this.data = { tasks: [], members: [] };
 			this.refetch();
 		});
 
 		this.$layout.on("change", ".wb-project", (e) => {
 			this.state.project = e.target.value || null;
-			// Counts belong to the old project - carrying the tile over would
-			// filter the new board by a selection the user never made on it.
-			this.state.stat_type = null;
-			this.state.stat_status = null;
-			this.state.overdue_only = false;
-			this.clear_item();
-			this.$layout.find(".wb-item").prop("disabled", !this.state.project);
-			// No work item yet - the server answers with the project's tasks due
-			// today, so the board is useful straight after picking a Project.
+			// Every selection belongs to the old project - carrying one over would
+			// filter the new board by names that are not on it.
+			this.clear_selection();
+			this.data = { tasks: [], members: [] };
+			// Nothing picked in the rows yet, so the board opens on the project's
+			// Tasks due inside the toolbar's range.
 			if (this.state.project) {
 				this.fetch_project_board();
 			} else {
@@ -256,29 +234,41 @@ class WorkBoard {
 			}
 		});
 
-		const search = frappe.utils.debounce(() => this.search_items(), 300);
-		this.$layout.on("input", ".wb-item", search);
-		this.$layout.on("focus", ".wb-item", () => this.search_items());
-
-		this.$layout.on("click", ".wb-search-result", (e) => {
-			const $row = $(e.currentTarget);
-			if (!$row.data("name")) {
-				this.clear_item();
-				this.fetch_project_board();
-				return;
-			}
-			this.state.item = $row.data("name");
-			this.state.item_label = $row.data("label");
-			this.$layout.find(".wb-item").val(`${this.state.item}: ${this.state.item_label}`);
-			// A work item's board is never date-limited, so the range is greyed out
-			// rather than left looking live.
-			this.$layout.find(".wb-from-date, .wb-to-date").prop("disabled", true);
-			this.hide_results();
+		// Multi-select. Picking in the Epic row narrows the Story row, and the Story
+		// row narrows the kanban - so an Epic click has to drop any Story picked
+		// under an Epic that is no longer selected, or the kanban would keep showing
+		// work from an Epic the user just cleared.
+		this.$layout.on("click", ".wb-chip", (e) => {
+			const $chip = $(e.currentTarget);
+			const set = this.state[$chip.data("row")];
+			const name = $chip.data("name");
+			if (set.has(name)) set.delete(name);
+			else set.add(name);
+			if ($chip.data("row") === "epics") this.prune_stories();
+			// The selection is what the server filters the cards by, so this is a
+			// refetch and not just a redraw.
 			this.fetch_project_board();
 		});
 
-		$(document).on("click.work_board", (e) => {
-			if (!$(e.target).closest(".wb-search-field").length) this.hide_results();
+		// Inside a chip, whose own click toggles the selection - this one routes to
+		// the work item's form instead.
+		this.$layout.on("click", ".wb-chip-id", (e) => {
+			e.stopPropagation();
+			frappe.set_route("Form", "Task", $(e.currentTarget).closest(".wb-chip").data("name"));
+		});
+
+		// Sits inside the chip, so .wb-chip-id's closest(".wb-chip") would resolve
+		// to the Story instead of the step's own Task - hence its own class and a
+		// data-task of its own, and stopPropagation for the chip's toggle.
+		this.$layout.on("click", ".wb-step-id", (e) => {
+			e.stopPropagation();
+			frappe.set_route("Form", "Task", $(e.currentTarget).data("task"));
+		});
+
+		this.$layout.on("click", ".wb-clear-row", (e) => {
+			this.state[$(e.currentTarget).data("row")].clear();
+			if ($(e.currentTarget).data("row") === "epics") this.prune_stories();
+			this.fetch_project_board();
 		});
 
 		// `toggle` doesn't bubble, so it is captured rather than delegated.
@@ -292,35 +282,11 @@ class WorkBoard {
 			true
 		);
 
-		// Inside a <summary>, so the default action would collapse the lane as well as
-		// route away. The .wb-card handler below still fires and does the routing.
-		this.$layout.on("click", ".wb-lane-link", (e) => e.preventDefault());
-
-		// Same, but this one routes itself - it is not a .wb-card, and it sits
-		// inside the lane header, so the toggle has to be stopped here too.
+		// Routes to the Issue a Story was raised from, not to the Story - so it has
+		// to stop the chip's own toggle handler.
 		this.$layout.on("click", ".wb-issue-link", (e) => {
-			e.preventDefault();
+			e.stopPropagation();
 			frappe.set_route("Form", "Issue", $(e.currentTarget).data("issue"));
-		});
-
-		this.$layout.on("click", ".wb-stat", (e) => {
-			const $tile = $(e.currentTarget);
-			if ($tile.hasClass("inert")) return;
-			const type = $tile.data("type");
-			const status = $tile.data("status");
-			// Overdue filters the tasks already loaded - no server round trip,
-			// and the cards stay in the status column they belong to.
-			if (type === "Overdue") {
-				this.state.overdue_only = !this.state.overdue_only;
-				this.render();
-				return;
-			}
-			// Clicking the active tile clears it - the tiles are a single-choice
-			// filter, so there is no separate "clear" control to miss.
-			const same = this.state.stat_type === type && this.state.stat_status === status;
-			this.state.stat_type = same ? null : type;
-			this.state.stat_status = same ? null : status;
-			this.refetch();
 		});
 
 		this.$layout.on("click", ".wb-card", (e) => {
@@ -328,17 +294,37 @@ class WorkBoard {
 		});
 	}
 
-	clear_item() {
-		this.state.item = null;
-		this.state.item_label = "";
-		this.$layout.find(".wb-item").val("");
-		this.$layout.find(".wb-from-date, .wb-to-date").prop("disabled", false);
-		this.hide_results();
-		this.data = { tasks: [], members: [] };
+	clear_selection() {
+		this.state.epics.clear();
+		this.state.stories.clear();
 	}
 
-	hide_results() {
-		this.$layout.find(".wb-search-results").empty().removeClass("open");
+	// Stories picked under an Epic that is no longer selected. Kept as a set
+	// operation rather than clearing the row outright: narrowing the Epic row
+	// should leave the picks that are still reachable alone.
+	prune_stories() {
+		if (!this.state.epics.size) return;
+		const visible = new Set(this.visible_stories().map((story) => story.name));
+		this.state.stories.forEach((name) => {
+			if (!visible.has(name)) this.state.stories.delete(name);
+		});
+	}
+
+	// The Story row's contents: every open Story, or only those under the picked
+	// Epics.
+	visible_stories() {
+		const stories = this.data.stories || [];
+		if (!this.state.epics.size) return stories;
+		return stories.filter((story) => this.state.epics.has(story.epic));
+	}
+
+	// What the server filters the cards by. null = nothing picked anywhere, so the
+	// whole project (inside the date range) is the answer. An empty array is a real
+	// answer too: picked Epics that hold no open Story at all.
+	selected_stories() {
+		if (this.state.stories.size) return [...this.state.stories];
+		if (!this.state.epics.size) return null;
+		return this.visible_stories().map((story) => story.name);
 	}
 
 	// Deep link support: frappe.route_options.project preselects the picker.
@@ -402,53 +388,18 @@ class WorkBoard {
 		});
 	}
 
-	search_items() {
-		if (!this.state.project) return;
-		frappe
-			.call(`${API}.search_work_items`, {
-				project: this.state.project,
-				txt: this.$layout.find(".wb-item").val(),
-			})
-			.then((r) => {
-				const rows = r.message || [];
-				const $results = this.$layout.find(".wb-search-results").empty();
-				// The only way back to the project-wide board - the picker is a
-				// free-text box with no other clear affordance.
-				$results.append(
-					$(`<div class="wb-search-result">
-						<span class="wb-search-type">${__("None")}</span>
-						<span class="wb-search-subject">${__("All tasks in the project")}</span>
-					</div>`).data({ name: "", label: "" })
-				);
-				if (!rows.length) {
-					$results
-						.addClass("open")
-						.append(`<div class="wb-search-empty">${__("No work items found")}</div>`);
-					return;
-				}
-				rows.forEach((row) => {
-					$results.append(
-						$(`<div class="wb-search-result">
-							<span class="wb-search-type">${__(row.work_item_type)}</span>
-							<span class="wb-search-id">${frappe.utils.escape_html(row.name)}</span>
-							<span class="wb-search-subject">${frappe.utils.escape_html(row.subject || "")}</span>
-						</div>`).data({ name: row.name, label: row.subject || "" })
-					);
-				});
-				$results.addClass("open");
-			});
-	}
-
 	fetch_project_board() {
+		const stories = this.selected_stories();
+		// The range only bounds an unfiltered board, so it is greyed out once
+		// something is picked rather than left looking live.
+		this.$layout.find(".wb-from-date, .wb-to-date").prop("disabled", stories !== null);
 		frappe
 			.call(`${API}.get_project_board`, {
 				project: this.state.project,
-				item: this.state.item,
+				stories: stories === null ? "" : JSON.stringify(stories),
 				from_date: this.state.from_date,
 				to_date: this.state.to_date,
 				extra_fields: JSON.stringify(this.card_fields),
-				stat_type: this.state.stat_type,
-				stat_status: this.state.stat_status,
 			})
 			.then((r) => {
 				this.data = r.message || { tasks: [], members: [] };
@@ -476,68 +427,150 @@ class WorkBoard {
 		}
 	}
 
+	// Three rows, top to bottom: Epics, Stories, then the Task kanban. Each row
+	// filters the one below it, so what is on screen is always readable straight
+	// down - no drilling in and no collapsed sections hiding the work.
 	render_project_view() {
 		if (!this.state.project) {
 			this.$body.html(this.empty_state(__("Select a Project to begin.")));
 			return;
 		}
-		const all_tasks = this.data.tasks || [];
-		const tasks = this.state.overdue_only ? all_tasks.filter(is_overdue) : all_tasks;
-		const stories = this.data.stories || [];
-		const filter_on = !!this.state.stat_type || this.state.overdue_only;
-		// An item board is already scoped to what was picked; the project-wide board
-		// is the one that has to name what a tile filtered it down to.
-		const item_board = !!this.state.item;
+		const tasks = this.data.tasks || [];
 		const epics = this.data.epics || [];
-		// Sections on the picked item's own chain open on arrival - the rest of the
-		// board stays collapsed. Empty on a tile-filtered board, which opens nothing.
-		const path = new Set(this.data.path || []);
-		// An Epic's board splits into one lane per Story. A project-wide board pools
-		// its cards - until a tile is on, when it splits the same way: the tile
-		// counts Epics/Stories, so the board has to say which ones. A matched Story
-		// keeps its lane at zero cards - that emptiness is the answer. Only the
-		// Overdue filter drops empty lanes, where "nothing late here" is not worth a
-		// lane of its own.
-		const drop_empty = !item_board && !this.state.stat_type;
-		let board;
-		if (epics.length) {
-			board = this.epic_lanes(tasks, epics, stories, drop_empty, path);
-		} else if (stories.length && (item_board || filter_on)) {
-			board = this.story_lanes(tasks, stories, drop_empty, false, path);
-		} else {
-			board = this.section(__("Status Board"), tasks.length, this.status_columns(tasks), {
-				columns_cls: "wb-columns-fill",
-			});
-		}
-		// Nothing left to lay out at all - only reachable with a filter on, since an
-		// unfiltered board always renders its (possibly empty) Status Board.
-		if (!board) {
-			board = this.empty_state(
-				this.state.overdue_only && !this.state.stat_type
-					? __("No overdue tasks here. Click the tile again to clear it.")
-					: __("No open tasks under {0} · {1}. Click the tile again to clear it.", [
-							__(this.state.stat_type),
-							__(this.state.stat_status),
-					  ])
-			);
-		}
+		const stories = this.visible_stories();
+
 		// Who-is-working-on-what across the whole team is a manager question;
-		// a project member gets the status board only.
+		// a project member gets the kanban only.
 		const employee_board = this.is_manager
 			? this.section(
 					__("Employee Board"),
 					tasks.length,
 					this.employee_columns(tasks, this.data.members || [], false),
-					// Collapsed until asked for - the status board answers the first
+					// Collapsed until asked for - the kanban answers the first
 					// question. State survives re-renders via the toggle handler.
 					{ open: this.state.employee_board_open, cls: "wb-employee-section" }
 			  )
 			: "";
+
 		this.$body.html(`
-			${this.stats_row(this.data.stats, all_tasks)}
-			${board}
+			${this.chip_row(__("Epics"), "epics", epics)}
+			${this.chip_row(__("Stories"), "stories", stories)}
+			${this.section(__("Tasks"), tasks.length, this.status_columns(tasks), {
+				columns_cls: "wb-columns-fill",
+			})}
 			${employee_board}
 		`);
+		this.setup_sortable();
+	}
+
+	// Re-created on every render: $body.html() throws the old lists away, and
+	// Sortable's instance lives on the element it was given.
+	setup_sortable() {
+		// The status kanban only. An employee column means "who is this on",
+		// so a drop there is a reassignment, not a status change - wiring it to
+		// the same handler would silently set the wrong field.
+		if (!frappe.model.can_write("Task")) return;
+		this.$body.find(".wb-columns-fill .wb-cards").each((i, el) => {
+			Sortable.create(el, {
+				group: "wb-tasks",
+				animation: 150,
+				// Without this the "No tasks" placeholder is draggable too, and
+				// an empty column still has to accept a drop.
+				draggable: ".wb-card",
+				onEnd: (e) => this.on_card_drop(e),
+			});
+		});
+	}
+
+	on_card_drop(e) {
+		const $to = $(e.to).closest(".wb-column");
+		const column = $to.data("column");
+		// Same column: the board has no manual card order to persist, so a
+		// reorder is a no-op rather than a write that changes nothing.
+		if (!column || column === $(e.from).closest(".wb-column").data("column")) return;
+		const name = $(e.item).data("name");
+		frappe.call({
+			method: `${API}.set_task_status`,
+			args: { task: name, column },
+			freeze: true,
+			freeze_message: __("Moving {0}", [name]),
+			// Refetch either way. On success the server has moved more than the
+			// one card (Story/Epic rollups, the stat tiles); on failure the drop
+			// has already moved the node and a re-render is what puts it back.
+			callback: () => this.refetch(),
+			error: () => this.refetch(),
+		});
+	}
+
+	// One selectable row. `row` is the state key it drives, which is also what the
+	// click handler reads off the chip - so the two rows share every line of this.
+	chip_row(label, row, items) {
+		const picked = this.state[row];
+		const chips = items.length
+			? items.map((item) => this.chip(row, item, picked.has(item.name))).join("")
+			: `<div class="wb-row-empty">${
+					row === "stories" && this.state.epics.size
+						? __("No open stories under the selected epics")
+						: __("Nothing open here")
+			  }</div>`;
+		// Only offered once something is picked - an always-on Clear reads as if
+		// something were filtered when nothing is.
+		const clear = picked.size
+			? `<span class="wb-clear-row" data-row="${row}">${__("Clear")}</span>`
+			: "";
+		return `<div class="wb-row">
+			<div class="wb-row-head">
+				<span class="wb-row-label">${frappe.utils.escape_html(label)}</span>
+				<span class="wb-count">${items.length}</span>
+				${picked.size ? `<span class="wb-row-picked">${__("{0} selected", [picked.size])}</span>` : ""}
+				${clear}
+			</div>
+			<div class="wb-chips">${chips}</div>
+		</div>`;
+	}
+
+	chip(row, item, selected) {
+		const color = status_color(item.status);
+		// Stories raised from an Issue (events/issue.py) link back to it - its own
+		// class, so the click routes to Issue and not to the Task the chip is for.
+		const issue = item.issue
+			? `<span class="wb-issue-link" data-issue="${frappe.utils.escape_html(item.issue)}"
+					title="${__("Open Issue")}">${frappe.utils.escape_html(item.issue)}</span>`
+			: "";
+		// Only the picked chip answers "where is this Story right now" - on every
+		// chip it would be a second status column nobody asked for.
+		const step = selected ? this.chip_step(item.current_step) : "";
+		return `<div class="wb-chip wb-chip-${color} ${selected ? "selected" : ""} ${step ? "has-step" : ""}"
+				data-row="${row}" data-name="${frappe.utils.escape_html(item.name)}">
+			<div class="wb-chip-head">
+				<span class="wb-dot wb-dot-${color}"></span>
+				<span class="wb-chip-subject" title="${frappe.utils.escape_html(
+					item.subject || item.name
+				)}">${frappe.utils.escape_html(item.subject || item.name)}</span>
+				<span class="wb-pill wb-pill-${color}">${__(item.status)}</span>
+				<span class="wb-chip-id" title="${__("Open")}">${frappe.utils.escape_html(item.name)}</span>
+				${issue}
+			</div>
+			${step}
+		</div>`;
+	}
+
+	// The Story's current step: the first split row in sequence that generated a
+	// Task still open (work_board.py:_current_steps). Absent until a Task exists,
+	// and gone again once every generated row is closed - the line is about work
+	// in flight, not work planned.
+	chip_step(step) {
+		if (!step) return "";
+		const color = status_color(step.status);
+		return `<div class="wb-chip-step">
+			<span class="wb-step-seq">${step.idx}.</span>
+			<span class="wb-step-item" title="${frappe.utils.escape_html(step.task_item || "")}">${frappe.utils.escape_html(
+			step.task_item || ""
+		)}</span>
+			<span class="wb-pill wb-pill-${color}">${__(step.status)}</span>
+			<span class="wb-step-id" data-task="${frappe.utils.escape_html(step.task)}"
+				title="${__("Open")}">${frappe.utils.escape_html(step.task)}</span>
+		</div>`;
 	}
 
 	render_department_view() {
@@ -555,146 +588,18 @@ class WorkBoard {
 		);
 	}
 
-	// Project-wide Epic/Story counts, and the board's coarse filter: a tile
-	// narrows the board to the Stories it stands for. Inert on a Story/Task board,
-	// which is already one item deep and has no lanes to narrow.
-	stats_row(stats, all_tasks) {
-		// Only ever rendered with a Project picked, so the bar always shows -
-		// zeroes while a fetch is in flight rather than a bar that pops in.
-		stats = stats || {};
-		const inert = this.data.item_type === "Story" || this.data.item_type === "Task";
-
-		const tiles = STAT_TILES.map(({ type, status, color }) => {
-			const count = (stats[type] || {})[status] || 0;
-			const active =
-				this.state.stat_type === type && this.state.stat_status === status && !inert;
-			// Nothing to filter to: a zero tile would only ever highlight an empty
-			// board, so it cannot be switched on. An already-active tile stays
-			// clickable even at zero - that click is the way to clear it.
-			const dead = (inert || !count) && !active;
-			return `<div class="wb-stat wb-stat-${color} ${active ? "active" : ""} ${
-				dead ? "inert" : ""
-			}" data-type="${type}" data-status="${status}">
-				<span class="wb-stat-label">
-					<span class="wb-dot wb-dot-${color}"></span>${__(type)} · ${__(status)}
-				</span>
-				<span class="wb-stat-value">${count}</span>
-			</div>`;
-		}).join("");
-
-		// Counted off the tasks on the board, not the project - the tile filters
-		// what is loaded, so a count from anywhere else would not match it. Stays
-		// live on a Story/Task board where the Epic/Story tiles go inert.
-		const overdue_count = (all_tasks || []).filter(is_overdue).length;
-		const overdue_active = this.state.overdue_only;
-		const overdue_tile = `<div class="wb-stat wb-stat-red ${overdue_active ? "active" : ""} ${
-			!overdue_count && !overdue_active ? "inert" : ""
-		}" data-type="Overdue">
-				<span class="wb-stat-label">
-					<span class="wb-dot wb-dot-red"></span>${__("Overdue")}
-				</span>
-				<span class="wb-stat-value">${overdue_count}</span>
-			</div>`;
-
-		return `<div class="wb-stats">${tiles}${overdue_tile}</div>`;
-	}
-
 	empty_state(message) {
 		return `<div class="wb-empty">${frappe.utils.escape_html(message)}</div>`;
 	}
 
-	// columns_cls: the status board has a fixed set of columns, so they share the
+	// columns_cls: the Task kanban has a fixed set of columns, so they share the
 	// full width. The employee board has one per member and stays scrollable.
-	// body_cls: an Epic section holds a stack of Story lanes rather than a row of
-	// columns, so it opts out of the flex row .wb-columns lays down.
-	section(
-		title,
-		count,
-		columns_html,
-		{ open = true, cls = "", columns_cls = "", badge = "", body_cls = "wb-columns" } = {}
-	) {
+	section(title, count, columns_html, { open = true, cls = "", columns_cls = "" } = {}) {
 		return `<details class="wb-section ${cls}" ${open ? "open" : ""}>
 			<summary class="wb-section-title">${frappe.utils.escape_html(title)}
-				<span class="wb-count">${count}</span>${badge}</summary>
-			<div class="${body_cls} ${columns_cls}">${columns_html}</div>
+				<span class="wb-count">${count}</span></summary>
+			<div class="wb-columns ${columns_cls}">${columns_html}</div>
 		</details>`;
-	}
-
-	// Epic > Story > cards. Driven off the server's Epic list rather than off the
-	// Stories, so an Epic with no Stories at all still gets a block - otherwise the
-	// board would show fewer blocks than the tile above it counted. Same reason a
-	// Story with no open Task keeps its lane. Everything starts collapsed; the
-	// counts on the headers are what the board is read for first - except on the
-	// chain down to a picked item, which opens so the searched-for thing is visible.
-	epic_lanes(tasks, epics, stories, drop_empty, path) {
-		return epics
-			.map((epic) => {
-				const own_stories = stories.filter((story) => story.epic === epic.name);
-				const own = tasks.filter((task) =>
-					own_stories.some((story) => story.name === task.parent_task)
-				);
-				const lanes = own_stories.length
-					? this.story_lanes(own, own_stories, drop_empty, true, path)
-					: `<div class="wb-column-empty">${__("No stories")}</div>`;
-				const pill = epic.status
-					? `<span class="wb-pill wb-pill-${status_color(epic.status)}">${__(epic.status)}</span>`
-					: "";
-				return this.section(epic.subject || epic.name, own.length, lanes, {
-					open: path.has(epic.name),
-					cls: "wb-epic-section",
-					body_cls: "wb-epic-body",
-					badge: `${pill}<span class="wb-lane-link wb-card" data-name="${frappe.utils.escape_html(
-						epic.name
-					)}">${frappe.utils.escape_html(epic.name)}</span>`,
-				});
-			})
-			.join("");
-	}
-
-	// One Status Board per Story. A Story with no open Tasks still gets a lane - its
-	// status is the point of the lane, and an absent lane would read as "no such
-	// Story" rather than "nothing open in it".
-	// Lanes start collapsed - the header carries the Story's status and card count,
-	// which is what the board is scanned for; the cards are what you open one for.
-	// nested: the lane sits inside an Epic section, which already names the Epic.
-	story_lanes(tasks, stories, drop_empty, nested = false, path = new Set()) {
-		return stories
-			.filter((story) => !drop_empty || tasks.some((task) => task.parent_task === story.name))
-			.map((story) => {
-				const own = tasks.filter((task) => task.parent_task === story.name);
-				// Which Epic this Story sits under - only sent for the project-wide
-				// board, where nothing else on screen names it.
-				const epic =
-					story.epic_subject && !nested
-						? `<span class="wb-lane-epic">${frappe.utils.escape_html(story.epic_subject)}</span>`
-						: "";
-				// Stories raised from an Issue (custom/issue.py) link back to it -
-				// its own class, so the click routes to Issue and not to the Task
-				// the rest of the lane header points at.
-				const issue = story.issue
-					? `<span class="wb-issue-link" data-issue="${frappe.utils.escape_html(
-							story.issue
-					  )}" title="${__("Open Issue")}">${frappe.utils.escape_html(story.issue)}</span>`
-					: "";
-				return this.section(
-					story.subject || story.name,
-					own.length,
-					this.status_columns(own),
-					{
-						open: path.has(story.name),
-						columns_cls: "wb-columns-fill",
-						// wb-card so the existing card handler routes to the Story's form;
-						// the lane-link handler stops that click from also toggling the lane.
-						badge: `${epic}<span class="wb-pill wb-pill-${status_color(story.status)}">${__(
-							story.status
-						)}</span>
-						<span class="wb-lane-link wb-card" data-name="${frappe.utils.escape_html(
-							story.name
-						)}">${frappe.utils.escape_html(story.name)}</span>${issue}`,
-					}
-				);
-			})
-			.join("");
 	}
 
 	status_columns(tasks) {
@@ -734,10 +639,16 @@ class WorkBoard {
 	column(title, tasks, color, show_project, member) {
 		tasks = tasks || [];
 		const avatar = member ? this.avatar(member) : "";
+		// No member means this came from status_columns(), where `title` is the
+		// raw BOARD_COLUMNS key (the heading is rendered untranslated) - which
+		// is exactly what set_task_status wants back. Employee columns get no
+		// data-column, so a stray drop there resolves to undefined and is
+		// dropped by on_card_drop rather than writing a status.
+		const column_attr = member ? "" : ` data-column="${frappe.utils.escape_html(title)}"`;
 		const cards = tasks.length
 			? tasks.map((t) => this.card(t, show_project, !!member)).join("")
 			: `<div class="wb-column-empty">${__("No tasks")}</div>`;
-		return `<div class="wb-column wb-column-${color}">
+		return `<div class="wb-column wb-column-${color}"${column_attr}>
 			<div class="wb-column-head">
 				<span class="wb-dot wb-dot-${color}"></span>
 				${avatar}
