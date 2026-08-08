@@ -1,11 +1,11 @@
 // Only Task and Sub-task are real work-logging leaves in our hierarchy;
-// Epic/Story's Actual Time is a rollup only (see sigzenjira/custom/timesheet.py).
+// Epic/Story's Actual Time is a rollup only (see sigzenjira/events/timesheet.py).
 frappe.ui.form.on("Timesheet", {
 	onload: function (frm) {
 		frm.set_query("task", "time_logs", function () {
 			return {
 				filters: {
-					custom_work_item_type: ["in", ["Task", "Sub-task"]],
+					custom_task_work_item_type: ["in", ["Task", "Sub-task"]],
 				},
 			};
 		});
@@ -15,7 +15,7 @@ frappe.ui.form.on("Timesheet", {
 		frappe.validated = false;
 
 		return frappe.call({
-			method: "sigzenjira.custom.timesheet.check_over_budget",
+			method: "sigzenjira.events.timesheet.check_over_budget",
 			args: { timesheet_name: frm.doc.name },
 		}).then((r) => {
 			const warnings = r.message || [];

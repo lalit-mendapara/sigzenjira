@@ -2,15 +2,15 @@ import frappe
 from frappe import _
 from frappe.utils import add_days, cint, flt, formatdate, getdate
 
-from sigzenjira.custom.permissions import user_is_project_member
+from sigzenjira.permission.project import user_is_project_member
 
 TASK_FIELDS = [
 	"name",
 	"subject",
 	"parent_task",
-	"custom_work_item_type",
+	"custom_task_work_item_type",
 	"status",
-	"custom_is_billable",
+	"custom_task_is_billable",
 	"expected_time",
 ]
 
@@ -88,14 +88,14 @@ def _roots(filters, by_name, children):
 def _prune(nodes, children):
 	# Post-order: a node survives if it is billable itself, or if any
 	# descendant survived. The `or kept` half should never fire - the one-way
-	# clamp (custom/billable.py) forbids a billable child under a non-billable
+	# clamp (events/billable.py) forbids a billable child under a non-billable
 	# parent - but without it, legacy data violating the clamp would have its
 	# billable hours silently swallowed.
 	kept_nodes = []
 	for node in nodes:
 		kept_children = _prune(children.get(node.name, []), children)
 		children[node.name] = kept_children
-		if kept_children or cint(node.custom_is_billable):
+		if kept_children or cint(node.custom_task_is_billable):
 			kept_nodes.append(node)
 	return kept_nodes
 
@@ -165,9 +165,9 @@ def _row(task, totals, root_names):
 	return {
 		"work_item": task.name,
 		"subject": task.subject,
-		"work_item_type": task.custom_work_item_type,
+		"work_item_type": task.custom_task_work_item_type,
 		"status": task.status,
-		"is_billable": cint(task.custom_is_billable),
+		"is_billable": cint(task.custom_task_is_billable),
 		"expected_time": flt(task.expected_time),
 		"actual_time": hours,
 		"variance": hours - flt(task.expected_time),

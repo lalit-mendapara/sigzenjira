@@ -11,7 +11,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"expected_time": expected_time,
 		}
@@ -21,7 +21,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 
 
 def extra_hours(task_name):
-	return flt(frappe.db.get_value("Task", task_name, "custom_extra_hours"))
+	return flt(frappe.db.get_value("Task", task_name, "custom_task_extra_hours"))
 
 
 def make_ahr(task_name, hours, reason="phase6 test"):
@@ -71,11 +71,11 @@ class TestPhase6Regression(IntegrationTestCase):
 			make_task("PH6 Story-3", "Story", epic.name, expected_time=1)
 
 		# The Task-vs-Story overflow-by-addition case that used to sit here is
-		# unreachable now: a Task can only reach a Story through its Task Split
-		# grid (block_manual_task_under_story), and rollup_story_expected_time
-		# folds each new row's hours straight into the Story's own budget, so
-		# adding one can never exceed it. Converting the call only moved the
-		# throw onto the Story-vs-Epic axis, which line 70-71 already covers.
+		# unreachable now: every Task under a Story ends up as a Task Split row,
+		# and rollup_story_expected_time folds each new row's hours straight
+		# into the Story's own budget, so adding one can never exceed it.
+		# Converting the call only moved the throw onto the Story-vs-Epic axis,
+		# which line 70-71 already covers.
 		# The Task-vs-Story budget is still exercised below, on the edit path.
 
 		# editing an existing Task's expected_time upward past budget is blocked too
@@ -138,12 +138,12 @@ class TestPhase6Regression(IntegrationTestCase):
 
 	def test_04_pre_existing_task_without_work_item_type(self):
 		# Simulates a Task created before this customization existed: insert
-		# bypassing the (now-mandatory) custom_work_item_type, the way a
+		# bypassing the (now-mandatory) custom_task_work_item_type, the way a
 		# pre-migration row would already sit in the DB with it blank.
 		doc = frappe.get_doc({"doctype": "Task", "subject": "PH6 Legacy Task (no type)"})
 		doc.flags.ignore_mandatory = True
 		doc.insert()
-		self.assertFalse(frappe.db.get_value("Task", doc.name, "custom_work_item_type"))
+		self.assertFalse(frappe.db.get_value("Task", doc.name, "custom_task_work_item_type"))
 
 		# Opening it (just a read) must not error.
 		reloaded = frappe.get_doc("Task", doc.name)
@@ -166,7 +166,7 @@ class TestPhase6Regression(IntegrationTestCase):
 			{
 				"doctype": "Project",
 				"project_name": "PH6 Notify Project",
-				"users": [{"user": approver, "custom_approve_extra_hours": 1}],
+				"users": [{"user": approver, "custom_project_user_approve_extra_hours": 1}],
 			}
 		).insert(ignore_permissions=True)
 
@@ -174,7 +174,7 @@ class TestPhase6Regression(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "PH6 Notify Task",
-				"custom_work_item_type": "Task",
+				"custom_task_work_item_type": "Task",
 				"project": project.name,
 				"expected_time": 2,
 			}
@@ -190,3 +190,34 @@ class TestPhase6Regression(IntegrationTestCase):
 			"Notification Log", filters={"document_type": "Additional Hours Request", "for_user": approver}
 		)
 		self.assertEqual(len(notifications), 1)
+
+	def test_06_requester_is_notified_on_approve_and_reject(self):
+		requester = "test_ahr_requester@example.com"
+		if not frappe.db.exists("User", requester):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": requester,
+					"first_name": "AHR Requester",
+					"send_welcome_email": 0,
+				}
+			).insert(ignore_permissions=True)
+
+		epic = make_task("PH6 N Epic", "Epic", expected_time=10)
+		story = make_task("PH6 N Story", "Story", epic.name, expected_time=6)
+		task = make_task_under_story(story, "PH6 N T1", 2)
+
+		for action, expected in ((approve, "approved"), (reject, "rejected")):
+			with self.subTest(action=expected):
+				frappe.db.delete("Notification Log", {"for_user": requester})
+				ahr = make_ahr(task.name, 1)
+				ahr.db_set("requested_by", requester)
+				action(ahr)
+
+				subjects = frappe.get_all(
+					"Notification Log",
+					filters={"document_type": "Additional Hours Request", "for_user": requester},
+					pluck="subject",
+				)
+				self.assertEqual(len(subjects), 1)
+				self.assertIn(expected, subjects[0])

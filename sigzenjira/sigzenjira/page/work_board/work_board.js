@@ -46,6 +46,7 @@ frappe.pages["work-board"].on_page_load = (wrapper) => {
 
 	const board = new WorkBoard(page);
 	wrapper.work_board = board;
+	board.listen();
 	board.load();
 };
 
@@ -126,6 +127,28 @@ class WorkBoard {
 				},
 			});
 			dialog.show();
+		});
+	}
+
+	// Live updates. Frappe already publishes `list_update` to the Task room on
+	// every Task save (document.py:notify_update), so subscribing to that room is
+	// the whole of it - no server-side publish of our own. Bound once per page
+	// instance, which frappe keeps alive for the session.
+	listen() {
+		frappe.realtime.doctype_subscribe("Task");
+		// One drag writes several Tasks (status, Story/Epic rollups, cascade
+		// completion) and each fires its own event - debounce so that lands as one
+		// refetch, not five.
+		const refresh = frappe.utils.debounce(() => {
+			// A board the user has routed away from refetches on page show anyway.
+			if (this.page.wrapper.is(":visible")) this.refetch();
+		}, 1000);
+		frappe.realtime.on("list_update", (data) => {
+			// ponytail: full refetch on any Task change, not a per-card patch. The
+			// board's counts, rollups and chip steps are all server-derived, so a
+			// targeted DOM patch would need most of that logic again on the client.
+			// Narrow to the changed card only if the refetch ever shows as lag.
+			if (data.doctype === "Task") refresh();
 		});
 	}
 
@@ -537,9 +560,9 @@ class WorkBoard {
 			? `<span class="wb-issue-link" data-issue="${frappe.utils.escape_html(item.issue)}"
 					title="${__("Open Issue")}">${frappe.utils.escape_html(item.issue)}</span>`
 			: "";
-		// Only the picked chip answers "where is this Story right now" - on every
-		// chip it would be a second status column nobody asked for.
-		const step = selected ? this.chip_step(item.current_step) : "";
+		// "where is this Story right now" is worth answering on every chip, not
+		// only the picked one - selection is a filter, not a disclosure control.
+		const step = this.chip_step(item.current_step);
 		return `<div class="wb-chip wb-chip-${color} ${selected ? "selected" : ""} ${step ? "has-step" : ""}"
 				data-row="${row}" data-name="${frappe.utils.escape_html(item.name)}">
 			<div class="wb-chip-head">

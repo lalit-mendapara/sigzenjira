@@ -12,9 +12,21 @@
   "is_billable",
   "requested_by",
   "additional_hours_requested",
+  "column_break_task_hours",
+  "task_allocated_hours",
+  "task_actual_hours",
+  "task_total_hours",
+  "reason_section",
   "reason",
   "status",
-  "approved_by"
+  "approved_by",
+  "story_budget_section",
+  "story",
+  "story_expected_hours",
+  "column_break_story_budget",
+  "story_allocated_hours",
+  "story_buffer_hours",
+  "approver_emails"
  ],
  "fields": [
   {
@@ -26,7 +38,7 @@
    "reqd": 1
   },
   {
-   "fetch_from": "task.custom_is_billable",
+   "fetch_from": "task.custom_task_is_billable",
    "fieldname": "is_billable",
    "fieldtype": "Check",
    "in_list_view": 1,
@@ -50,6 +62,40 @@
    "reqd": 1
   },
   {
+   "depends_on": "eval:doc.task",
+   "fieldname": "column_break_task_hours",
+   "fieldtype": "Column Break",
+   "label": "Task Hours"
+  },
+  {
+   "depends_on": "eval:doc.task",
+   "description": "The Task's own estimated hours (Expected Time).",
+   "fieldname": "task_allocated_hours",
+   "fieldtype": "Float",
+   "label": "Allocated Hours",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.task",
+   "description": "Hours logged against the Task through submitted Timesheets.",
+   "fieldname": "task_actual_hours",
+   "fieldtype": "Float",
+   "label": "Actual Hours",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.task",
+   "description": "Allocated plus extra hours already approved on this Task.",
+   "fieldname": "task_total_hours",
+   "fieldtype": "Float",
+   "label": "Allocated + Extra Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break"
+  },
+  {
    "fieldname": "reason",
    "fieldtype": "Small Text",
    "label": "Reason",
@@ -70,6 +116,53 @@
    "fieldtype": "Link",
    "label": "Approved By",
    "options": "User",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.story",
+   "fieldname": "story_budget_section",
+   "fieldtype": "Section Break",
+   "label": "Story Budget"
+  },
+  {
+   "fieldname": "story",
+   "fieldtype": "Link",
+   "label": "Story",
+   "options": "Task",
+   "read_only": 1
+  },
+  {
+   "description": "The Story's own budget - what it may spend in total.",
+   "fieldname": "story_expected_hours",
+   "fieldtype": "Float",
+   "label": "Story Expected Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_story_budget",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Estimated hours plus already-approved extra hours, across the Story's Task Split rows.",
+   "fieldname": "story_allocated_hours",
+   "fieldtype": "Float",
+   "label": "Allocated Hours",
+   "read_only": 1
+  },
+  {
+   "description": "Expected minus allocated - the unallocated headroom this request can come out of.",
+   "fieldname": "story_buffer_hours",
+   "fieldtype": "Float",
+   "label": "Buffer Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approver_emails",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Approver Emails",
+   "no_copy": 1,
+   "print_hide": 1,
    "read_only": 1
   }
  ],

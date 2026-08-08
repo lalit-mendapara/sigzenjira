@@ -412,9 +412,8 @@ def get_project_board(project, stories=None, from_date=None, to_date=None, extra
 	story_rows = _open_work_items(
 		project, "Story", ["name", "subject", "status", "parent_task as epic", "issue"]
 	)
-	# Two queries for the whole row rather than one per chip. Only the selected
-	# chip renders it, but the selection lives on the client - shipping it for
-	# every Story is what keeps selecting a chip from costing a round trip.
+	# Two queries for the whole row rather than one per chip - every Story chip
+	# renders its step, so it all ships with the board in one round trip.
 	steps = _current_steps([story.name for story in story_rows])
 	for story in story_rows:
 		story["current_step"] = steps.get(story.name)

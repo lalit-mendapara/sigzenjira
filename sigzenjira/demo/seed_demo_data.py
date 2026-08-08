@@ -120,7 +120,7 @@ def make_employee(user):
 
 
 def make_task(subject, work_item_type, parent_task=None, expected_time=0, assigned=None):
-	existing = frappe.db.get_value("Task", {"subject": subject, "custom_work_item_type": work_item_type})
+	existing = frappe.db.get_value("Task", {"subject": subject, "custom_task_work_item_type": work_item_type})
 	if existing:
 		return frappe.get_doc("Task", existing)
 
@@ -128,7 +128,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0, assign
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"expected_time": expected_time,
 		}

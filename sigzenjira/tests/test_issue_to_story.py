@@ -1,9 +1,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.custom.issue import make_story
+from sigzenjira.events.issue import make_story
 
-from .test_status_cascade import make_task_under_story
 
 
 def make_issue(subject="Test Issue", issue_type=None, priority=None, project=None):
@@ -27,7 +26,7 @@ class TestIssueToStory(IntegrationTestCase):
 		task_name = make_story(issue.name)
 		task = frappe.get_doc("Task", task_name)
 
-		self.assertEqual(task.custom_work_item_type, "Story")
+		self.assertEqual(task.custom_task_work_item_type, "Story")
 		self.assertEqual(task.issue, issue.name)
 		self.assertIsNone(task.parent_task or None)
 
@@ -38,7 +37,7 @@ class TestIssueToStory(IntegrationTestCase):
 		issue = make_issue("Crash on save", issue_type="Bug")
 		task = frappe.get_doc("Task", make_story(issue.name))
 
-		self.assertEqual(task.custom_issue_type, "Bug")
+		self.assertEqual(task.custom_task_issue_type, "Bug")
 
 	def test_make_story_maps_project_from_issue(self):
 		project = frappe.get_doc({"doctype": "Project", "project_name": "Issue2Story Project"}).insert(
@@ -50,6 +49,17 @@ class TestIssueToStory(IntegrationTestCase):
 
 		self.assertEqual(task.project, project.name)
 
+	def test_issue_description_edit_syncs_to_story(self):
+		issue = make_issue("Description follows the Issue")
+		story = make_story(issue.name)
+
+		issue.description = "<p>Updated from the ticket</p>"
+		issue.save()
+
+		self.assertEqual(
+			frappe.db.get_value("Task", story, "description"), "<p>Updated from the ticket</p>"
+		)
+
 	def test_only_one_story_per_issue(self):
 		issue = make_issue("Duplicate story attempt")
 		make_story(issue.name)
@@ -57,23 +67,11 @@ class TestIssueToStory(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			make_story(issue.name)
 
-	def test_story_completion_resolves_linked_issue(self):
+	def test_story_completion_leaves_issue_status_alone(self):
 		issue = make_issue("Resolve me")
 		task = frappe.get_doc("Task", make_story(issue.name))
 
 		task.status = "Completed"
 		task.save()
 
-		self.assertEqual(frappe.db.get_value("Issue", issue.name, "status"), "Resolved")
-
-	def test_cascade_completion_does_not_resolve_issue(self):
-		issue = make_issue("Cascade should not resolve")
-		story = frappe.get_doc("Task", make_story(issue.name))
-
-		# A Story's Tasks come only from its Task Split grid
-		# (custom/task.py:block_manual_task_under_story) - same fix as
-		# test_status_cascade.py and friends.
-		make_task_under_story(story, "Sub piece", expected_hours=1, status="Completed")
-
-		self.assertEqual(frappe.db.get_value("Task", story.name, "status"), "Completed")
 		self.assertNotEqual(frappe.db.get_value("Issue", issue.name, "status"), "Resolved")

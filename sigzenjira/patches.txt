@@ -11,20 +11,26 @@
 #   3. docs that aren't in `fixtures` (hooks.py) - Workflow, Workspace
 #
 # Everything else - Custom Field, Property Setter, Custom DocPerm, Report,
-# Number Card, Dashboard Chart, Dashboard, Kanban Board - is a fixture and is
+# Number Card, Dashboard Chart, Dashboard, Notification - is a fixture and is
 # re-applied on EVERY `bench migrate` (frappe/utils/fixtures.py, force=True).
-# Edit custom_fields.py / install.py, run `bench export-fixtures`, commit the
+# Edit custom_field.py / setup.py, run `bench export-fixtures`, commit the
 # JSON. Do not add a patch for it.
-sigzenjira.patches.v0_0.normalize_custom_field_names
-sigzenjira.patches.v0_0.add_additional_hours_request_workflow
-sigzenjira.patches.v0_0.create_pm_dashboard
-sigzenjira.patches.v0_0.backfill_task_split_assign_ecd
-sigzenjira.patches.v0_0.remove_task_project_name_field
-sigzenjira.patches.v0_0.wire_project_user_hour_flags
-sigzenjira.patches.v0_0.widen_additional_hours_request_approval_role
-sigzenjira.patches.v0_0.backfill_task_split_actual_hours
-sigzenjira.patches.v0_0.add_work_board_shortcut
-sigzenjira.patches.v0_0.remove_all_kanban_boards
-sigzenjira.patches.v0_0.clamp_actual_extra_hours_at_zero
-sigzenjira.patches.v0_0.remove_planned_billable_hours_field
-sigzenjira.patches.v0_0.backfill_non_billable_hours
+sigzenjira.patches.rename_custom_fields_with_doctype_prefix
+sigzenjira.patches.normalize_custom_field_names
+sigzenjira.patches.add_additional_hours_request_workflow
+sigzenjira.patches.add_pm_dashboard_shortcut
+sigzenjira.patches.backfill_task_split_assign_ecd
+sigzenjira.patches.remove_task_project_name_field
+sigzenjira.patches.wire_project_user_hour_flags
+sigzenjira.patches.widen_additional_hours_request_approval_role
+sigzenjira.patches.backfill_task_split_actual_hours
+sigzenjira.patches.add_work_board_shortcut
+sigzenjira.patches.remove_all_kanban_boards
+sigzenjira.patches.clamp_actual_extra_hours_at_zero
+sigzenjira.patches.remove_planned_billable_hours_field
+sigzenjira.patches.backfill_non_billable_hours
+sigzenjira.patches.clear_ahr_story_budget_snapshot
+sigzenjira.patches.backfill_all_time_assignees
+sigzenjira.patches.remove_assign_to_user_fields
+sigzenjira.patches.backfill_task_issue_ecd
+sigzenjira.patches.drop_split_work_layout_fields

@@ -23,7 +23,7 @@ def make_story(subject="ESR Story", epic=None):
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": "Story",
+			"custom_task_work_item_type": "Story",
 			"parent_task": epic.name if epic else None,
 		}
 	)
@@ -52,15 +52,15 @@ class TestEmployeeStoryTemplateRestriction(IntegrationTestCase):
 		frappe.set_user(user)
 		try:
 			story_as_employee = frappe.get_doc("Task", story.name)
-			story_as_employee.custom_task_template = template.name
-			story_as_employee.append("custom_task_split", {"task_item": "Design", "description": "Design step"})
+			story_as_employee.custom_task_task_template = template.name
+			story_as_employee.append("custom_task_task_split", {"task_item": "Design", "description": "Design step"})
 			story_as_employee.save()
 		finally:
 			frappe.set_user("Administrator")
 
 		story.reload()
-		self.assertEqual(story.custom_task_template, template.name)
-		self.assertEqual(len(story.custom_task_split), 1)
+		self.assertEqual(story.custom_task_task_template, template.name)
+		self.assertEqual(len(story.custom_task_task_split), 1)
 
 	def test_employee_cannot_edit_other_fields(self):
 		user = ensure_employee_user()
@@ -82,11 +82,40 @@ class TestEmployeeStoryTemplateRestriction(IntegrationTestCase):
 		frappe.set_user(user)
 		try:
 			story_as_employee = frappe.get_doc("Task", story.name)
-			story_as_employee.append("custom_task_split", {"task_item": "Real work", "expected_hours": 5})
+			story_as_employee.append("custom_task_task_split", {"task_item": "Real work", "expected_hours": 5})
 			with self.assertRaises(frappe.ValidationError):
 				story_as_employee.save()
 		finally:
 			frappe.set_user("Administrator")
+
+	def test_employee_cannot_delete_split_row(self):
+		user = ensure_employee_user()
+		story = make_story("ESR Row Delete")
+		story.append("custom_task_task_split", {"task_item": "Design", "description": "Design step"})
+		story.save()
+
+		frappe.set_user(user)
+		try:
+			story_as_employee = frappe.get_doc("Task", story.name)
+			story_as_employee.custom_task_task_split = []
+			with self.assertRaises(frappe.ValidationError):
+				story_as_employee.save()
+		finally:
+			frappe.set_user("Administrator")
+
+		story.reload()
+		self.assertEqual(len(story.custom_task_task_split), 1)
+
+	def test_privileged_role_can_delete_split_row(self):
+		story = make_story("ESR Row Delete Privileged")
+		story.append("custom_task_task_split", {"task_item": "Design", "description": "Design step"})
+		story.save()
+
+		story.custom_task_task_split = []
+		story.save()
+
+		story.reload()
+		self.assertEqual(len(story.custom_task_task_split), 0)
 
 	def test_employee_has_read_only_access_to_task_template(self):
 		user = ensure_employee_user()

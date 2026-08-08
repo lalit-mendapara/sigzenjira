@@ -323,7 +323,7 @@
   "dynamic_filters_json": null,
   "filters_json": "[]",
   "from_date": null,
-  "group_by_based_on": "custom_work_item_type",
+  "group_by_based_on": "custom_task_work_item_type",
   "group_by_type": "Count",
   "heatmap_year": null,
   "is_public": 0,

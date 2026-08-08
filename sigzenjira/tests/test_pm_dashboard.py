@@ -3,7 +3,12 @@ import json
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.install import create_pm_dashboard_reports, create_pm_dashboard_cards, create_pm_dashboard_charts, create_pm_dashboard
+from sigzenjira.dashboard.pm_dashboard import (
+	create_pm_dashboard,
+	create_pm_dashboard_cards,
+	create_pm_dashboard_charts,
+	create_pm_dashboard_reports,
+)
 
 
 class TestPMDashboardReports(IntegrationTestCase):
@@ -119,7 +124,7 @@ class TestPMDashboardCharts(IntegrationTestCase):
 				"doctype": "Task",
 				"subject": "Test Task for Dashboard Charts",
 				"status": "Open",
-				"custom_work_item_type": "Task",
+				"custom_task_work_item_type": "Task",
 			}).insert(ignore_permissions=True)
 
 	def test_creates_eight_charts_with_correct_roles(self):

@@ -19,7 +19,7 @@ frappe.query_reports["Project Hour Consumption"] = {
 			options: "Task",
 			get_query: function () {
 				const project = frappe.query_report.get_filter_value("project");
-				const filters = { custom_work_item_type: "Story" };
+				const filters = { custom_task_work_item_type: "Story" };
 				if (project) {
 					filters.project = project;
 				}

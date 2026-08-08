@@ -9,7 +9,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"expected_time": expected_time,
 		}
@@ -35,9 +35,9 @@ class TestActualTimeReparent(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Task", epic.name, "actual_time"), 3)
 
-		# moving it back out should drop the Epic's total again
+		# but it can't be moved back out again - the parent is frozen once set
 		story.reload()
 		story.parent_task = None
-		story.save()
+		self.assertRaises(frappe.ValidationError, story.save)
 
-		self.assertEqual(frappe.db.get_value("Task", epic.name, "actual_time"), 0)
+		self.assertEqual(frappe.db.get_value("Task", epic.name, "actual_time"), 3)

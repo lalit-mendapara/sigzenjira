@@ -2,8 +2,9 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
-from sigzenjira.custom.issue import make_story
-from sigzenjira.custom.task import create_task_without_hours
+from sigzenjira.events.billable import BILLABLE_FIELDS
+from sigzenjira.events.issue import make_story
+from sigzenjira.events.task import create_task_without_hours
 
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
 # a doctype folder (frappe/tests/classes/integration_test_case.py:59 raises
@@ -16,14 +17,21 @@ from sigzenjira.custom.task import create_task_without_hours
 
 
 def make_project(name, is_billable=0):
+	# project_type is mandatory on this bench (a Property Setter, not app code),
+	# so every Project fixture here has to carry one.
 	return frappe.get_doc(
-		{"doctype": "Project", "project_name": name, "custom_is_billable": is_billable}
+		{
+			"doctype": "Project",
+			"project_name": name,
+			"project_type": "Internal",
+			"custom_project_is_billable": is_billable,
+		}
 	).insert(ignore_permissions=True)
 
 
 def make_issue(subject, project=None, is_billable=0):
 	return frappe.get_doc(
-		{"doctype": "Issue", "subject": subject, "project": project, "custom_is_billable": is_billable}
+		{"doctype": "Issue", "subject": subject, "project": project, "custom_issue_is_billable": is_billable}
 	).insert()
 
 
@@ -34,27 +42,30 @@ def make_task(
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"project": project,
 			"issue": issue,
 			"expected_time": expected_time,
-			"custom_is_billable": is_billable,
+			"custom_task_is_billable": is_billable,
 		}
 	).insert()
 
 
 class TestBillableFields(IntegrationTestCase):
 	def test_billable_custom_fields_exist(self):
-		for doctype in ("Project", "Issue", "Task"):
+		# Asserted straight off BILLABLE_FIELDS so the map the clamp actually
+		# resolves through is the thing under test - a doctype added there
+		# without its custom field fails here rather than at runtime.
+		for doctype, fieldname in BILLABLE_FIELDS.items():
 			self.assertTrue(
-				frappe.db.exists("Custom Field", {"dt": doctype, "fieldname": "custom_is_billable"}),
-				f"custom_is_billable missing on {doctype}",
+				frappe.db.exists("Custom Field", {"dt": doctype, "fieldname": fieldname}),
+				f"{fieldname} missing on {doctype}",
 			)
 
 	def test_billable_fields_are_checks_defaulting_to_zero(self):
-		for doctype in ("Project", "Issue", "Task"):
-			meta_field = frappe.get_meta(doctype).get_field("custom_is_billable")
+		for doctype, fieldname in BILLABLE_FIELDS.items():
+			meta_field = frappe.get_meta(doctype).get_field(fieldname)
 			self.assertEqual(meta_field.fieldtype, "Check")
 			self.assertEqual(meta_field.default, "0")
 
@@ -63,11 +74,11 @@ class TestBillableFields(IntegrationTestCase):
 		# costs the customer money, so the flag has to be visible at approval
 		# time. fetch_from does the work; nothing here may write back.
 		meta_field = frappe.get_meta("Additional Hours Request").get_field("is_billable")
-		self.assertEqual(meta_field.fetch_from, "task.custom_is_billable")
+		self.assertEqual(meta_field.fetch_from, "task.custom_task_is_billable")
 		self.assertEqual(meta_field.read_only, 1)
 
 		task = make_task("AHR billable mirror", "Task", project=make_project("AHR Billable Co", 1).name)
-		task.db_set("custom_is_billable", 1)
+		task.db_set("custom_task_is_billable", 1)
 		request = frappe.get_doc(
 			{
 				"doctype": "Additional Hours Request",
@@ -87,10 +98,9 @@ class TestBillableFields(IntegrationTestCase):
 
 class TestBillableUpwardClamp(IntegrationTestCase):
 	def test_billable_subtask_under_non_billable_task_throws(self):
-		# Sub-task under Task is the manual parent/child pair with no creation
-		# gate - block_manual_task_under_story forbids adding a Task straight to
-		# a Story, so a Task/Story pair here would throw for that reason instead
-		# and the clamp would never be exercised.
+		# Sub-task under Task is the plain parent/child pair - a Task/Story pair
+		# would drag in create_split_row_for_manual_task's row mirroring and the
+		# Story budget check, neither of which this clamp test is about.
 		task = make_task("BC Clamp Task", "Task", expected_time=10, is_billable=0)
 
 		with self.assertRaises(frappe.ValidationError) as caught:
@@ -110,8 +120,8 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 		billed = make_task("BC Billed Sub", "Sub-task", task.name, is_billable=1)
 		free = make_task("BC Free Sub", "Sub-task", task.name, is_billable=0)
 
-		self.assertEqual(billed.custom_is_billable, 1)
-		self.assertEqual(free.custom_is_billable, 0)
+		self.assertEqual(billed.custom_task_is_billable, 1)
+		self.assertEqual(free.custom_task_is_billable, 0)
 
 	def test_billable_epic_under_non_billable_project_throws(self):
 		project = make_project("BC Free Project", is_billable=0)
@@ -143,11 +153,11 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Split Clamp Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 0,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 0,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Billed work", "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Billed work", "is_billable": 1})
 
 		with self.assertRaises(frappe.ValidationError) as caught:
 			story.insert()
@@ -156,14 +166,14 @@ class TestBillableUpwardClamp(IntegrationTestCase):
 
 class TestBillableDownwardClamp(IntegrationTestCase):
 	def test_unchecking_task_with_billable_subtask_throws(self):
-		# Sub-task under Task is the manual parent/child pair with no creation
-		# gate - block_manual_task_under_story forbids adding a Task straight to
-		# a Story, so a Task/Story pair here would throw for that reason instead.
+		# Sub-task under Task is the plain parent/child pair - a Task/Story pair
+		# would drag in create_split_row_for_manual_task's row mirroring, which
+		# this clamp test is not about.
 		task = make_task("BC Down Task", "Task", expected_time=10, is_billable=1)
 		make_task("BC Down Sub", "Sub-task", task.name, is_billable=1)
 
 		task.reload()
-		task.custom_is_billable = 0
+		task.custom_task_is_billable = 0
 		with self.assertRaises(frappe.ValidationError) as caught:
 			task.save()
 		self.assertIn("Cannot turn off Billable while", str(caught.exception))
@@ -173,17 +183,17 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 		make_task("BC Down Free Sub", "Sub-task", task.name, is_billable=0)
 
 		task.reload()
-		task.custom_is_billable = 0
+		task.custom_task_is_billable = 0
 		task.save()
 
-		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 0)
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_task_is_billable"), 0)
 
 	def test_unchecking_project_with_billable_issue_throws(self):
 		project = make_project("BC Down Project", is_billable=1)
 		make_issue("BC Down Issue", project=project.name, is_billable=1)
 
 		project.reload()
-		project.custom_is_billable = 0
+		project.custom_project_is_billable = 0
 		with self.assertRaises(frappe.ValidationError) as caught:
 			project.save()
 		self.assertIn("Cannot turn off Billable while", str(caught.exception))
@@ -194,7 +204,7 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 		make_task("BC Down Issue Story", "Story", project=project.name, issue=issue.name, is_billable=1)
 
 		issue.reload()
-		issue.custom_is_billable = 0
+		issue.custom_issue_is_billable = 0
 		with self.assertRaises(frappe.ValidationError) as caught:
 			issue.save()
 		self.assertIn("Cannot turn off Billable while", str(caught.exception))
@@ -207,19 +217,19 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Down Both Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Some work", "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Some work", "is_billable": 1})
 		story.insert()
 
 		story.reload()
-		story.custom_is_billable = 0
-		story.custom_task_split[0].is_billable = 0
+		story.custom_task_is_billable = 0
+		story.custom_task_task_split[0].is_billable = 0
 		story.save()
 
-		self.assertEqual(frappe.db.get_value("Task", story.name, "custom_is_billable"), 0)
+		self.assertEqual(frappe.db.get_value("Task", story.name, "custom_task_is_billable"), 0)
 
 	def test_unticking_a_split_row_with_a_billable_subtask_under_it_throws(self):
 		# The split grid is the primary editing surface for a Story, and its
@@ -231,33 +241,33 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Row Unbill Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Row work", "expected_hours": 4, "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Row work", "expected_hours": 4, "is_billable": 1})
 		story.insert()
 		story.reload()
 
-		generated = story.custom_task_split[0].generated_task
+		generated = story.custom_task_task_split[0].generated_task
 		sub = make_task("BC Row Unbill Sub", "Sub-task", generated, is_billable=1)
 
-		story.custom_task_split[0].is_billable = 0
+		story.custom_task_task_split[0].is_billable = 0
 		with self.assertRaises(frappe.ValidationError) as caught:
 			story.save()
 		self.assertIn("Cannot turn off Billable on row", str(caught.exception))
 		self.assertIn(sub.name, str(caught.exception))
-		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_task_is_billable"), 1)
 
 		sub.reload()
-		sub.custom_is_billable = 0
+		sub.custom_task_is_billable = 0
 		sub.save()
 
 		story.reload()
-		story.custom_task_split[0].is_billable = 0
+		story.custom_task_task_split[0].is_billable = 0
 		story.save()
 
-		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 0)
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_task_is_billable"), 0)
 
 
 BILLABLE_EMPLOYEE_USER = "test_billable_employee@example.com"
@@ -288,7 +298,7 @@ class TestBillablePermission(IntegrationTestCase):
 		frappe.set_user(user)
 		try:
 			as_employee = frappe.get_doc("Task", task.name)
-			as_employee.custom_is_billable = 1
+			as_employee.custom_task_is_billable = 1
 			with self.assertRaises(frappe.ValidationError) as caught:
 				as_employee.save()
 			self.assertIn("can change Billable.", str(caught.exception))
@@ -308,16 +318,16 @@ class TestBillablePermission(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
-		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_task_is_billable"), 1)
 
 	def test_privileged_role_can_change_billable(self):
 		parent = make_task("BC Perm Privileged Parent", "Task", expected_time=10, is_billable=1)
 		task = make_task("BC Perm Privileged Sub", "Sub-task", parent.name, is_billable=0)
 
-		task.custom_is_billable = 1
+		task.custom_task_is_billable = 1
 		task.save()
 
-		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", task.name, "custom_task_is_billable"), 1)
 
 	def test_non_privileged_user_cannot_change_split_row_billable(self):
 		user = ensure_billable_employee_user()
@@ -325,17 +335,17 @@ class TestBillablePermission(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Perm Split Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Perm item", "is_billable": 0})
+		story.append("custom_task_task_split", {"task_item": "Perm item", "is_billable": 0})
 		story.insert()
 
 		frappe.set_user(user)
 		try:
 			as_employee = frappe.get_doc("Task", story.name)
-			as_employee.custom_task_split[0].is_billable = 1
+			as_employee.custom_task_task_split[0].is_billable = 1
 			with self.assertRaises(frappe.ValidationError) as caught:
 				as_employee.save()
 			# Discriminating substring on purpose: a bare "Task Split" also matches
@@ -345,6 +355,61 @@ class TestBillablePermission(IntegrationTestCase):
 		finally:
 			frappe.set_user("Administrator")
 
+	def test_allocate_hour_flag_holder_can_change_split_row_billable(self):
+		# The "Allocate Hour + Billable Check/Uncheck" grant. Same shape as the
+		# denial above, only the Story now sits on a Project the user is flagged
+		# on - so the flag is the sole difference between saving and throwing.
+		user = ensure_billable_employee_user()
+		project = frappe.get_doc(
+			{
+				"doctype": "Project",
+				"project_name": "BC Perm Split Grant Project",
+				"project_type": "Internal",
+				"custom_project_is_billable": 1,
+				# Every Check spelled out: one left off a dict comes back 1, not 0.
+				"users": [
+					{
+						"user": user,
+						"custom_project_user_allocate_hours": 1,
+						"custom_project_user_assign_users": 0,
+						"custom_project_user_approve_extra_hours": 0,
+						"custom_project_user_set_work_item_type": 0,
+					}
+				],
+			}
+		).insert(ignore_permissions=True)
+		story = frappe.get_doc(
+			{
+				"doctype": "Task",
+				"subject": "BC Perm Split Grant Story",
+				"custom_task_work_item_type": "Story",
+				"project": project.name,
+				"custom_task_is_billable": 1,
+			}
+		)
+		story.append("custom_task_task_split", {"task_item": "Grant item", "is_billable": 0})
+		story.insert()
+		row_name = story.custom_task_task_split[0].name
+
+		frappe.set_user(user)
+		try:
+			as_employee = frappe.get_doc("Task", story.name)
+			as_employee.custom_task_task_split[0].is_billable = 1
+			as_employee.save()
+
+			# The grant stops at the grid: the Story's own flag stays out of reach.
+			# Not asserted on message - a flag holder without Set Work Item Type
+			# trips validate_story_template_only ("You can only select a Task
+			# Template on this Story.") before the Billable gate even runs.
+			as_employee.custom_task_is_billable = 0
+			with self.assertRaises(frappe.ValidationError):
+				as_employee.save()
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", story.name, "custom_task_is_billable"), 1)
+
 	def test_non_privileged_user_cannot_add_a_billable_split_row(self):
 		# Adding a row is a distinct path from flipping one: the new row has no
 		# pre-save snapshot, so it lands on before_rows' default-to-0 branch.
@@ -353,15 +418,15 @@ class TestBillablePermission(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Perm Split Add Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		).insert()
 
 		frappe.set_user(user)
 		try:
 			as_employee = frappe.get_doc("Task", story.name)
-			as_employee.append("custom_task_split", {"task_item": "Added item", "is_billable": 1})
+			as_employee.append("custom_task_task_split", {"task_item": "Added item", "is_billable": 1})
 			with self.assertRaises(frappe.ValidationError) as caught:
 				as_employee.save()
 			self.assertIn("change Billable on the Task Split table", str(caught.exception))
@@ -381,15 +446,15 @@ class TestBillablePermission(IntegrationTestCase):
 				{
 					"doctype": "Task",
 					"subject": "BC New Gate Sub",
-					"custom_work_item_type": "Sub-task",
+					"custom_task_work_item_type": "Sub-task",
 					"parent_task": parent.name,
-					"custom_is_billable": 1,
+					"custom_task_is_billable": 1,
 				}
 			).insert()
 		finally:
 			frappe.set_user("Administrator")
 
-		self.assertEqual(frappe.db.get_value("Task", sub.name, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", sub.name, "custom_task_is_billable"), 1)
 
 	def test_employee_still_cannot_invent_billable_without_a_source(self):
 		# Project, not a parentless Sub-task: PARENT_SOURCES["Project"] is empty,
@@ -404,7 +469,7 @@ class TestBillablePermission(IntegrationTestCase):
 				{
 					"doctype": "Project",
 					"project_name": "BC New Gate Orphan Project",
-					"custom_is_billable": 1,
+					"custom_project_is_billable": 1,
 				}
 			)
 			with self.assertRaises(frappe.ValidationError) as caught:
@@ -421,7 +486,7 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		story = frappe.get_doc("Task", make_story(issue.name))
 
-		self.assertEqual(story.custom_is_billable, 1)
+		self.assertEqual(story.custom_task_is_billable, 1)
 
 	def test_make_story_copies_unbilled_support_issue(self):
 		# Post-delivery support: Project still billable, this Issue is not.
@@ -430,68 +495,68 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		story = frappe.get_doc("Task", make_story(issue.name))
 
-		self.assertEqual(story.custom_is_billable, 0)
+		self.assertEqual(story.custom_task_is_billable, 0)
 
 	def test_split_row_generates_billable_task(self):
 		story = frappe.get_doc(
 			{
 				"doctype": "Task",
 				"subject": "BC Prop Split Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Billed item", "expected_hours": 3, "is_billable": 1})
-		story.append("custom_task_split", {"task_item": "Free item", "expected_hours": 2, "is_billable": 0})
+		story.append("custom_task_task_split", {"task_item": "Billed item", "expected_hours": 3, "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Free item", "expected_hours": 2, "is_billable": 0})
 		story.insert()
 
 		story.reload()
-		billed_row, free_row = story.custom_task_split[0], story.custom_task_split[1]
+		billed_row, free_row = story.custom_task_task_split[0], story.custom_task_task_split[1]
 
-		self.assertEqual(frappe.db.get_value("Task", billed_row.generated_task, "custom_is_billable"), 1)
-		self.assertEqual(frappe.db.get_value("Task", free_row.generated_task, "custom_is_billable"), 0)
+		self.assertEqual(frappe.db.get_value("Task", billed_row.generated_task, "custom_task_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", free_row.generated_task, "custom_task_is_billable"), 0)
 
 	def test_unchecking_split_row_pushes_to_generated_task(self):
 		story = frappe.get_doc(
 			{
 				"doctype": "Task",
 				"subject": "BC Prop Push Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Push item", "expected_hours": 3, "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Push item", "expected_hours": 3, "is_billable": 1})
 		story.insert()
 		story.reload()
-		generated = story.custom_task_split[0].generated_task
+		generated = story.custom_task_task_split[0].generated_task
 		# Generation seeded it from the row; without this the post-assert below
 		# could not tell a working push from a field that was never set.
-		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 1)
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_task_is_billable"), 1)
 
-		story.custom_task_split[0].is_billable = 0
+		story.custom_task_task_split[0].is_billable = 0
 		story.save()
 
-		self.assertEqual(frappe.db.get_value("Task", generated, "custom_is_billable"), 0)
+		self.assertEqual(frappe.db.get_value("Task", generated, "custom_task_is_billable"), 0)
 
 	def test_unchecking_generated_task_pulls_back_to_split_row(self):
 		story = frappe.get_doc(
 			{
 				"doctype": "Task",
 				"subject": "BC Prop Pull Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Pull item", "expected_hours": 3, "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Pull item", "expected_hours": 3, "is_billable": 1})
 		story.insert()
 		story.reload()
-		row_name = story.custom_task_split[0].name
+		row_name = story.custom_task_task_split[0].name
 		# Generation seeded it from the row; without this the post-assert below
 		# could not tell a working pull from a field that was never set.
 		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 1)
 
-		generated = frappe.get_doc("Task", story.custom_task_split[0].generated_task)
-		generated.custom_is_billable = 0
+		generated = frappe.get_doc("Task", story.custom_task_task_split[0].generated_task)
+		generated.custom_task_is_billable = 0
 		generated.save()
 
 		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 0)
@@ -505,12 +570,12 @@ class TestBillablePropagation(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "BC Prop Uncosted Story",
-				"custom_work_item_type": "Story",
-				"custom_is_billable": 1,
+				"custom_task_work_item_type": "Story",
+				"custom_task_is_billable": 1,
 			}
 		)
-		story.append("custom_task_split", {"task_item": "Billed uncosted", "is_billable": 1})
-		story.append("custom_task_split", {"task_item": "Free uncosted", "is_billable": 0})
+		story.append("custom_task_task_split", {"task_item": "Billed uncosted", "is_billable": 1})
+		story.append("custom_task_task_split", {"task_item": "Free uncosted", "is_billable": 0})
 		story.insert()
 		story.reload()
 
@@ -524,11 +589,11 @@ class TestBillablePropagation(IntegrationTestCase):
 		# create_task_without_hours behind the OTHER sync path. Checking
 		# billed_task before free_task exists keeps this test isolated to the
 		# function under test.
-		billed_task = create_task_without_hours(story.custom_task_split[0].name)
-		self.assertEqual(frappe.db.get_value("Task", billed_task, "custom_is_billable"), 1)
+		billed_task = create_task_without_hours(story.custom_task_task_split[0].name)
+		self.assertEqual(frappe.db.get_value("Task", billed_task, "custom_task_is_billable"), 1)
 
-		free_task = create_task_without_hours(story.custom_task_split[1].name)
-		self.assertEqual(frappe.db.get_value("Task", free_task, "custom_is_billable"), 0)
+		free_task = create_task_without_hours(story.custom_task_task_split[1].name)
+		self.assertEqual(frappe.db.get_value("Task", free_task, "custom_task_is_billable"), 0)
 
 
 def make_billable_test_employee():

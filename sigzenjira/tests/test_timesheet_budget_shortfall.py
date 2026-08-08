@@ -2,7 +2,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
-from sigzenjira.custom.timesheet import check_over_budget
+from sigzenjira.events.timesheet import check_over_budget
 
 
 class TestTimesheetBudgetRemaining(IntegrationTestCase):
@@ -25,7 +25,7 @@ class TestTimesheetBudgetRemaining(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "PH7 Remaining Task",
-				"custom_work_item_type": "Task",
+				"custom_task_work_item_type": "Task",
 				"expected_time": 5,
 			}
 		).insert()
@@ -74,7 +74,7 @@ class TestTimesheetBudgetRemaining(IntegrationTestCase):
 			{
 				"doctype": "Task",
 				"subject": "PH7 No Budget Task",
-				"custom_work_item_type": "Task",
+				"custom_task_work_item_type": "Task",
 			}
 		).insert()
 

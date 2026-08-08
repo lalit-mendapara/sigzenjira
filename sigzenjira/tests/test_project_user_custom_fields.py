@@ -4,7 +4,7 @@ from frappe.tests import IntegrationTestCase
 
 class TestProjectUserCustomFields(IntegrationTestCase):
 	def test_project_user_flag_fields_exist(self):
-		for fieldname in ("custom_allocate_hours", "custom_assign_users", "custom_approve_extra_hours"):
+		for fieldname in ("custom_project_user_allocate_hours", "custom_project_user_assign_users", "custom_project_user_approve_extra_hours"):
 			self.assertEqual(
 				frappe.db.get_value("Custom Field", {"dt": "Project User", "fieldname": fieldname}, "fieldtype"),
 				"Check",

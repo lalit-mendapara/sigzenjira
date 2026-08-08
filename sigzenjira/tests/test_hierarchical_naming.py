@@ -11,7 +11,7 @@ def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"expected_time": expected_time,
 		}
@@ -52,17 +52,28 @@ class TestHierarchicalNaming(IntegrationTestCase):
 		self.assertRegex(story.name, r"^S-\d{3}$")
 		self.assertEqual(make_task_under_story(story, "NM3 T", 2).name, f"{story.name}-T-001")
 
-	def test_reparenting_does_not_rename(self):
+	def test_reparenting_is_refused_once_a_parent_is_set(self):
 		story = make_task("NM4 Story", "Story", expected_time=40)
 		task_a = make_task_under_story(story, "NM4 Task A", 2)
 		task_b = make_task_under_story(story, "NM4 Task B", 2)
 		sub = make_task("NM4 Sub", "Sub-task", task_a.name)
 
 		sub.parent_task = task_b.name
-		sub.save()
+		self.assertRaises(frappe.ValidationError, sub.save)
 
-		# name is a birth certificate, not a live path
+		# the name stays a birth certificate because the branch can't move
+		sub.reload()
+		self.assertEqual(sub.parent_task, task_a.name)
 		self.assertEqual(sub.name, f"{task_a.name}-ST-001")
+
+	def test_a_standalone_item_can_still_be_attached_later(self):
+		epic = make_task("NM6 Epic", "Epic", expected_time=20)
+		story = make_task("NM6 Story", "Story", expected_time=5)
+
+		story.parent_task = epic.name
+		story.save()
+
+		self.assertEqual(frappe.db.get_value("Task", story.name, "parent_task"), epic.name)
 
 	def test_name_fits_the_column(self):
 		epic = make_task("NM5 Epic", "Epic", expected_time=20)

@@ -6,8 +6,11 @@ function seed_billable_from_source(frm) {
 	if (!frm.doc.project) {
 		return;
 	}
-	frappe.db.get_value("Project", frm.doc.project, "custom_is_billable").then((r) => {
-		frm.set_value("custom_is_billable", cint(r.message && r.message.custom_is_billable));
+	frappe.db.get_value("Project", frm.doc.project, "custom_project_is_billable").then((r) => {
+		frm.set_value(
+			"custom_issue_is_billable",
+			cint(r.message && r.message.custom_project_is_billable)
+		);
 	});
 }
 
@@ -36,7 +39,7 @@ frappe.ui.form.on("Issue", {
 				__("Story"),
 				() => {
 					frappe.call({
-						method: "sigzenjira.custom.issue.make_story",
+						method: "sigzenjira.events.issue.make_story",
 						args: { issue_name: frm.doc.name },
 						callback: (r) => {
 							if (r.message) {

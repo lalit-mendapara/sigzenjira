@@ -59,15 +59,15 @@ class TestCostingRollup(IntegrationTestCase):
 		for name in (task.name, story.name, epic.name):
 			self.assertEqual(frappe.db.get_value("Task", name, "total_costing_amount"), 200)
 			self.assertEqual(frappe.db.get_value("Task", name, "total_billing_amount"), 300)
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_billable_hours"), 2)
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_non_billable_hours"), 0)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_billable_hours"), 2)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_non_billable_hours"), 0)
 
 		timesheet.cancel()
 
 		for name in (task.name, story.name, epic.name):
 			self.assertEqual(frappe.db.get_value("Task", name, "total_costing_amount"), 0)
 			self.assertEqual(frappe.db.get_value("Task", name, "total_billing_amount"), 0)
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_billable_hours"), 0)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_billable_hours"), 0)
 
 		activity_cost.delete()
 
@@ -87,7 +87,7 @@ class TestCostingRollup(IntegrationTestCase):
 		).insert()
 
 		# A non-billable Sub-task under a billable Task is a legitimate mixed
-		# state - the clamp only blocks the reverse (custom/billable.py).
+		# state - the clamp only blocks the reverse (events/billable.py).
 		epic = make_task("Non Billable Epic", "Epic", expected_time=20, is_billable=1)
 		story = make_task("Non Billable Story", "Story", epic.name, expected_time=10, is_billable=1)
 		task = make_task_under_story(story, "Non Billable Task", 5, is_billable=1)
@@ -104,7 +104,7 @@ class TestCostingRollup(IntegrationTestCase):
 						"from_time": f"{today()} 09:00:00",
 						"hours": 3,
 						# Forced back to 0 from the Sub-task on before_validate
-						# (custom/timesheet.py:force_is_billable_from_task), so
+						# (events/timesheet.py:force_is_billable_from_task), so
 						# asking for billable here must not make it so.
 						"is_billable": 1,
 					}
@@ -115,10 +115,10 @@ class TestCostingRollup(IntegrationTestCase):
 
 		for name in (sub_task.name, task.name, story.name, epic.name):
 			self.assertEqual(frappe.db.get_value("Task", name, "actual_time"), 3)
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_billable_hours"), 0)
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_non_billable_hours"), 3)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_billable_hours"), 0)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_non_billable_hours"), 3)
 
 		timesheet.cancel()
 
 		for name in (sub_task.name, task.name, story.name, epic.name):
-			self.assertEqual(frappe.db.get_value("Task", name, "custom_non_billable_hours"), 0)
+			self.assertEqual(frappe.db.get_value("Task", name, "custom_task_non_billable_hours"), 0)

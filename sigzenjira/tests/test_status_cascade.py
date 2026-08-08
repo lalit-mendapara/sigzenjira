@@ -9,11 +9,11 @@ def make_task(
 		{
 			"doctype": "Task",
 			"subject": subject,
-			"custom_work_item_type": work_item_type,
+			"custom_task_work_item_type": work_item_type,
 			"parent_task": parent_task,
 			"expected_time": expected_time,
 			"status": status,
-			"custom_is_billable": is_billable,
+			"custom_task_is_billable": is_billable,
 			"project": project,
 		}
 	)
@@ -22,12 +22,11 @@ def make_task(
 
 
 def make_task_under_story(story, task_item, expected_hours=0, status="Open", is_billable=0):
-	# A Story's Tasks come only from its Task Split grid
-	# (custom/task.py:block_manual_task_under_story) - appending a row and
-	# saving is the only supported way to put a Task under a Story, so every
-	# test that used to pass a Story straight to make_task goes through here.
+	# Appending a row and saving is the grid path a Story's Tasks normally come
+	# from, so every test that used to pass a Story straight to make_task goes
+	# through here.
 	story.append(
-		"custom_task_split",
+		"custom_task_task_split",
 		{"task_item": task_item, "expected_hours": expected_hours, "is_billable": is_billable},
 	)
 	story.save()
@@ -35,7 +34,7 @@ def make_task_under_story(story, task_item, expected_hours=0, status="Open", is_
 
 	# ponytail: assumes task_item is unique within a Story - true at every
 	# call site today, and a duplicate would silently return the first match.
-	row = next(r for r in story.custom_task_split if r.task_item == task_item)
+	row = next(r for r in story.custom_task_task_split if r.task_item == task_item)
 	task = frappe.get_doc("Task", row.generated_task)
 
 	if status != "Open":
@@ -113,8 +112,8 @@ class TestStatusCascade(IntegrationTestCase):
 
 	def test_story_stays_working_while_a_split_row_is_ungenerated(self):
 		story = make_task("PH7 Split Story", "Story", expected_time=0)
-		story.append("custom_task_split", {"task_item": "Done bit", "expected_hours": 3})
-		story.append("custom_task_split", {"task_item": "Not costed yet"})  # no hours -> no Task
+		story.append("custom_task_task_split", {"task_item": "Done bit", "expected_hours": 3})
+		story.append("custom_task_task_split", {"task_item": "Not costed yet"})  # no hours -> no Task
 		story.save()
 
 		generated = frappe.get_all("Task", filters={"parent_task": story.name}, pluck="name")

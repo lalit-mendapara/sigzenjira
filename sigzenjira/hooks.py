@@ -69,6 +69,23 @@ fixtures = [
 	},
 	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
 	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template"]]]},
+	# Re-applied force=True on every migrate like every other fixture, so the
+	# subject/message here are the source of truth - edit setup.py and
+	# re-export rather than tweaking the body in Desk, which a migrate undoes.
+	{
+		"doctype": "Notification",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Extra Hours Request Submitted",
+					"Extra Hours Request Approved",
+					"Extra Hours Request Rejected",
+				],
+			]
+		],
+	},
 ]
 
 # Apps
@@ -155,8 +172,8 @@ doctype_js = {
 # Installation
 # ------------
 
-# before_install = "sigzenjira.install.before_install"
-after_install = "sigzenjira.install.after_install"
+# before_install = "sigzenjira.setup.before_install"
+after_install = "sigzenjira.setup.after_install"
 
 # Uninstallation
 # ------------
@@ -198,14 +215,14 @@ after_install = "sigzenjira.install.after_install"
 
 permission_query_conditions = {
 	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.get_permission_query_conditions",
-	"Task": "sigzenjira.custom.permissions.task_query_conditions",
-	"Project": "sigzenjira.custom.permissions.project_query_conditions",
+	"Task": "sigzenjira.permission.project.task_query_conditions",
+	"Project": "sigzenjira.permission.project.project_query_conditions",
 }
 
 has_permission = {
 	"Additional Hours Request": "sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_request.has_permission",
-	"Task": "sigzenjira.custom.permissions.task_has_permission",
-	"Project": "sigzenjira.custom.permissions.project_has_permission",
+	"Task": "sigzenjira.permission.project.task_has_permission",
+	"Project": "sigzenjira.permission.project.project_has_permission",
 }
 
 # Document Events
@@ -214,63 +231,76 @@ has_permission = {
 
 doc_events = {
 	"Task": {
-		"autoname": "sigzenjira.custom.task.autoname",
-		"before_validate": "sigzenjira.custom.task.mark_parent_as_group",
+		"autoname": "sigzenjira.events.task.autoname",
+		"before_validate": "sigzenjira.events.task.mark_parent_as_group",
 		"validate": [
-			"sigzenjira.custom.task.validate_work_item_type_permission",
-			"sigzenjira.custom.task.validate_hierarchy",
-			"sigzenjira.custom.task.block_manual_task_under_story",
-			"sigzenjira.custom.task.validate_one_story_per_issue",
-			"sigzenjira.custom.task.validate_task_split_expected_hours_permission",
-			"sigzenjira.custom.task.validate_task_split_assign_permission",
-			"sigzenjira.custom.task.validate_employee_story_field_restriction",
-			"sigzenjira.custom.task.rollup_story_expected_time",
-			"sigzenjira.custom.task.validate_hour_budget",
-			"sigzenjira.custom.task.validate_expected_time_edit_permission",
-			"sigzenjira.custom.task.sync_actual_extra_hours",
-			"sigzenjira.custom.billable.validate_billable_edit_permission",
-			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
-			"sigzenjira.custom.billable.validate_task_split_billable",
-			"sigzenjira.custom.billable.validate_split_row_unbilling",
-			"sigzenjira.custom.billable.validate_no_billable_dependants",
+			"sigzenjira.events.task.validate_work_item_type_permission",
+			"sigzenjira.events.task.validate_hierarchy",
+			"sigzenjira.events.task.validate_parent_task_is_immutable",
+			"sigzenjira.events.task.validate_one_story_per_issue",
+			"sigzenjira.events.task.validate_task_split_expected_hours_permission",
+			"sigzenjira.events.task.validate_task_split_assign_permission",
+			"sigzenjira.events.task.validate_task_split_row_deletion",
+			"sigzenjira.events.task.validate_employee_story_field_restriction",
+			"sigzenjira.events.task.rollup_story_expected_time",
+			"sigzenjira.events.task.validate_hour_budget",
+			"sigzenjira.events.task.validate_expected_time_edit_permission",
+			"sigzenjira.events.task.sync_actual_extra_hours",
+			"sigzenjira.events.billable.validate_billable_edit_permission",
+			"sigzenjira.events.billable.validate_billable_under_billable_parent",
+			"sigzenjira.events.billable.validate_task_split_billable",
+			"sigzenjira.events.billable.validate_split_row_unbilling",
+			"sigzenjira.events.billable.validate_no_billable_dependants",
 		],
 		"on_update": [
-			"sigzenjira.custom.task.delete_tasks_for_removed_split_rows",
-			"sigzenjira.custom.task.generate_tasks_from_split",
-			"sigzenjira.custom.task.sync_split_row_edits_to_generated_task",
-			"sigzenjira.custom.task.sync_expected_hours_to_split_row",
-			"sigzenjira.custom.task.cascade_completion_to_parent",
-			"sigzenjira.custom.task.sync_issue_status_on_story_completion",
-			"sigzenjira.custom.timesheet.rollup_actual_time_on_reparent",
+			"sigzenjira.events.task.create_split_row_for_manual_task",
+			"sigzenjira.events.task.delete_tasks_for_removed_split_rows",
+			"sigzenjira.events.task.generate_tasks_from_split",
+			"sigzenjira.events.task.sync_split_row_edits_to_generated_task",
+			"sigzenjira.events.task.sync_expected_hours_to_split_row",
+			"sigzenjira.events.task.cascade_completion_to_parent",
+			"sigzenjira.events.timesheet.rollup_actual_time_on_reparent",
 		],
-		"on_trash": "sigzenjira.custom.task.cleanup_task_references_on_delete",
+		"on_trash": "sigzenjira.events.task.cleanup_task_references_on_delete",
 	},
 	"Project": {
 		# No validate_billable_under_billable_parent here: PARENT_SOURCES["Project"]
 		# is empty (Project is the root), so it would be an unconditional no-op.
 		"validate": [
-			"sigzenjira.custom.billable.validate_billable_edit_permission",
-			"sigzenjira.custom.billable.validate_no_billable_dependants",
+			"sigzenjira.events.billable.validate_billable_edit_permission",
+			"sigzenjira.events.billable.validate_no_billable_dependants",
 		],
 	},
 	"Issue": {
 		"validate": [
-			"sigzenjira.custom.billable.validate_billable_edit_permission",
-			"sigzenjira.custom.billable.validate_billable_under_billable_parent",
-			"sigzenjira.custom.billable.validate_no_billable_dependants",
+			"sigzenjira.events.billable.validate_billable_edit_permission",
+			"sigzenjira.events.billable.validate_billable_under_billable_parent",
+			"sigzenjira.events.billable.validate_no_billable_dependants",
 		],
+		"on_update": "sigzenjira.events.issue.sync_description_to_story",
 	},
 	"ToDo": {
-		"before_insert": "sigzenjira.custom.todo.validate_task_assign_permission",
-		"after_insert": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
-		"on_update": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
-		"on_trash": "sigzenjira.custom.todo.sync_todo_assignment_to_split_row",
+		"before_insert": "sigzenjira.events.todo.validate_task_assign_permission",
+		"after_insert": [
+			"sigzenjira.events.todo.sync_todo_assignment_to_split_row",
+			"sigzenjira.events.todo.sync_all_time_assignees",
+		],
+		"on_update": [
+			"sigzenjira.events.todo.sync_todo_assignment_to_split_row",
+			"sigzenjira.events.todo.sync_all_time_assignees",
+		],
+		# sync_all_time_assignees is append-only, so a deleted ToDo changes
+		# nothing - no point firing it on_trash.
+		"on_trash": "sigzenjira.events.todo.sync_todo_assignment_to_split_row",
 	},
 	"Timesheet": {
-		"before_validate": "sigzenjira.custom.timesheet.force_is_billable_from_task",
-		"validate": "sigzenjira.custom.timesheet.validate_task_type",
-		"on_submit": "sigzenjira.custom.timesheet.rollup_actual_time",
-		"on_cancel": "sigzenjira.custom.timesheet.rollup_actual_time",
+		"before_validate": [
+			"sigzenjira.events.timesheet.force_is_billable_from_task",
+			"sigzenjira.events.timesheet.resync_billing_hours",
+		],
+		"validate": "sigzenjira.events.timesheet.validate_task_type",
+		"on_submit": "sigzenjira.events.timesheet.rollup_actual_time",
+		"on_cancel": "sigzenjira.events.timesheet.rollup_actual_time",
 	},
 }
 
@@ -298,14 +328,14 @@ doc_events = {
 # Testing
 # -------
 
-# before_tests = "sigzenjira.install.before_tests"
+# before_tests = "sigzenjira.setup.before_tests"
 
 # Extend DocType Class
 # ------------------------------
 #
 # Specify custom mixins to extend the standard doctype controller.
 # extend_doctype_class = {
-# 	"Task": "sigzenjira.custom.task.CustomTaskMixin"
+# 	"Task": "sigzenjira.events.task.CustomTaskMixin"
 # }
 
 # Overriding Methods
@@ -319,7 +349,7 @@ doc_events = {
 # generated from the base implementation of the doctype dashboard,
 # along with any modifications made in other Frappe apps
 # override_doctype_dashboards = {
-# 	"Task": "sigzenjira.custom.task_dashboard.get_dashboard_data"
+# 	"Task": "sigzenjira.events.task_dashboard.get_dashboard_data"
 # }
 
 # exempt linked doctypes from being automatically cancelled

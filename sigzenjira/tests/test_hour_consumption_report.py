@@ -30,7 +30,7 @@ def make_billable_project(name):
 		{
 			"doctype": "Project",
 			"project_name": f"{name} {frappe.generate_hash(length=6)}",
-			"custom_is_billable": 1,
+			"custom_project_is_billable": 1,
 		}
 	).insert(ignore_permissions=True)
 
@@ -170,8 +170,7 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 			expected_time=10,
 			is_billable=1,
 		)
-		# A Story's Tasks may only come from its Task Split grid
-		# (custom/task.py:block_manual_task_under_story).
+		# Built through the Story's Task Split grid, the normal planning path.
 		self.billable_task = make_task_under_story(self.story, "HCR Billable", 5, is_billable=1)
 		self.non_billable_task = make_task_under_story(self.story, "HCR Non Billable", 5, is_billable=0)
 
@@ -224,7 +223,7 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		_columns, data, _message, _chart, _summary = execute({"project": self.project.name})
 		rows = rows_by_work_item(data)
 		# Story: 10 expected, 7 actual - under budget must read negative, which
-		# Task.custom_actual_extra_hours (clamped at 0) could never show.
+		# Task.custom_task_actual_extra_hours (clamped at 0) could never show.
 		self.assertEqual(rows[self.story.name]["variance"], -3)
 
 	def test_draft_timesheets_excluded(self):
@@ -244,10 +243,13 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		self.assertEqual(rows[self.story.name]["parent_task"], "")
 
 	def test_reparented_task_still_appears(self):
-		# Names encode the hierarchy but reparenting deliberately does not
-		# rename, so this Sub-task keeps a name prefixed by Story 1 while
+		# Names encode the hierarchy but a reparented item deliberately does
+		# not rename, so this Sub-task keeps a name prefixed by Story 1 while
 		# actually living under Story 2. A name-prefix query filtered on
 		# Story 2 would silently drop it; a parent_task walk finds it.
+		# validate_parent_task_is_immutable now refuses this move through a
+		# save, so the row is planted with a raw write - the rows this guards
+		# against are the ones that already moved before that rule existed.
 		second_story = make_task(
 			"HCR Tree Story 2",
 			"Story",
@@ -263,8 +265,7 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		)
 		self.assertTrue(stray.name.startswith(self.billable_task.name))
 
-		stray.parent_task = second_task.name
-		stray.save()
+		frappe.db.set_value("Task", stray.name, "parent_task", second_task.name, update_modified=False)
 
 		_columns, data, _message, _chart, _summary = execute(
 			{"project": self.project.name, "story": second_story.name}
@@ -276,8 +277,7 @@ class TestHourConsumptionReportTree(IntegrationTestCase):
 		# child whose parent_task lives elsewhere can't be walked to - the
 		# design spec says it must surface as a root rather than vanish.
 		# validate_hierarchy only checks the parent's work-item TYPE (a
-		# Sub-task needs a Task parent), never that project matches, and
-		# block_manual_task_under_story only restricts Task-under-Story - so a
+		# Sub-task needs a Task parent), never that project matches - so a
 		# Sub-task under another project's Task is reachable through a normal
 		# save.
 		other = make_billable_project("HCR Tree Other Project")
@@ -394,12 +394,12 @@ class TestHourConsumptionReportDateRange(IntegrationTestCase):
 		)
 		# Estimates have no date dimension - they stay whole-life, which is why
 		# the report carries a banner saying so (see the message test).
-		# Story.expected_time is 5, not the 10 passed to make_task: setUp's
-		# single make_task_under_story call appends one custom_task_split row
-		# with expected_hours=5, and rollup_story_expected_time (task.py:303)
-		# overwrites expected_time with the split-row sum as soon as any split
-		# row exists.
-		self.assertEqual(rows_by_work_item(data)[self.story.name]["expected_time"], 5)
+		# Story.expected_time stays the 10 passed to make_task: it was typed on
+		# insert, above the 5h that setUp's single make_task_under_story call
+		# later allocates in custom_task_task_split, so rollup_story_expected_time
+		# treats it as a pinned budget instead of overwriting it with the
+		# split-row sum.
+		self.assertEqual(rows_by_work_item(data)[self.story.name]["expected_time"], 10)
 
 
 class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
@@ -444,7 +444,7 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 		# The one-way clamp forbids this state, so it should never occur - but a
 		# blanket "drop every non-billable node" would swallow billable hours if
 		# legacy data ever violated it.
-		frappe.db.set_value("Task", self.story.name, "custom_is_billable", 0)
+		frappe.db.set_value("Task", self.story.name, "custom_task_is_billable", 0)
 		try:
 			_columns, data, _message, _chart, _summary = execute(
 				{"project": self.project.name, "billable_only": 1}
@@ -453,7 +453,7 @@ class TestHourConsumptionReportBillableOnly(IntegrationTestCase):
 			self.assertIn(self.story.name, rows)
 			self.assertIn(self.billable_task.name, rows)
 		finally:
-			frappe.db.set_value("Task", self.story.name, "custom_is_billable", 1)
+			frappe.db.set_value("Task", self.story.name, "custom_task_is_billable", 1)
 
 
 class TestHourConsumptionReportSummary(IntegrationTestCase):
