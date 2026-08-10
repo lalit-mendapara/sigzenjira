@@ -2,7 +2,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, sbool
 
 from sigzenjira.events.task import WORK_ITEM_TYPE_PRIVILEGED_ROLES
 from sigzenjira.events.timesheet import recompute_actual_time, recompute_project_billable_hours
@@ -44,6 +44,7 @@ DETAIL_FIELDS = [
 	"task",
 	"project",
 	"activity_type",
+	"description",
 	"from_time",
 	"hours",
 	"billing_hours",
@@ -98,7 +99,38 @@ def get_bootstrap():
 	return {"projects": projects, "work_item_types": list(WORK_ITEM_ORDER)}
 
 
-def _timesheet_rows(project, from_date=None, to_date=None, employee=None):
+def _employee_options(project, rows):
+	"""Everyone the Employee filter offers: the project's team plus anyone who billed here.
+
+	A Project User who has not logged time yet still belongs in the list - missing
+	hours are exactly what a reviewer goes looking for. Someone who billed without
+	being on the team stays too, or their rows would be unreachable. The list is
+	NOT scoped by Employee.company: a person employed by one company can log time
+	on another company's project, and their hours are still on this invoice.
+	"""
+	options = {row.employee: (row.employee_name or row.employee) for row in rows if row.employee}
+
+	users = frappe.get_all(
+		"Project User", filters={"parent": project, "parenttype": "Project"}, pluck="user"
+	)
+	if users:
+		# Left employees are only listed when they actually billed the project -
+		# their rows are still money owed, but they are not staff to chase.
+		for emp in frappe.get_all(
+			"Employee",
+			filters={"user_id": ["in", users], "status": ["!=", "Left"]},
+			fields=["name", "employee_name"],
+			limit_page_length=0,
+		):
+			options.setdefault(emp.name, emp.employee_name or emp.name)
+
+	return [
+		{"name": name, "employee_name": label}
+		for name, label in sorted(options.items(), key=lambda pair: pair[1] or pair[0])
+	]
+
+
+def _timesheet_rows(project, from_date=None, to_date=None, employee=None, is_updated=None):
 	filters = {"project": project, "docstatus": 1}
 	if from_date:
 		filters["from_time"] = [">=", from_date]
@@ -135,22 +167,22 @@ def _timesheet_rows(project, from_date=None, to_date=None, employee=None):
 		row.employee = sheet.employee if sheet else None
 		row.employee_name = (sheet.employee_name or sheet.employee) if sheet else None
 
-	# The dropdown is built from who actually billed hours here, NOT from
-	# Employee.company: a person employed by one company can log time on another
-	# company's project, and scoping this by company would hide their hours from
-	# the invoice review while still counting them in the project total.
-	#
 	# Built before the employee filter is applied, so selecting someone does not
 	# collapse the list to just them.
-	employees = sorted(
-		{(row.employee, row.employee_name) for row in rows if row.employee},
-		key=lambda pair: pair[1] or pair[0],
-	)
+	employees = _employee_options(project, rows)
 
 	if employee:
 		rows = [row for row in rows if row.employee == employee]
 
-	return rows, [{"name": name, "employee_name": label} for name, label in employees]
+	# A row ticked as read is done with, so it drops out of the working list. The
+	# filter flips that: ticked on, it is the only way back to what was already
+	# settled. Applied after the dropdown is built so a person whose rows are all
+	# read does not disappear from it.
+	if is_updated is not None:
+		want = 1 if is_updated else 0
+		rows = [row for row in rows if (1 if row.custom_timesheet_detail_mark_as_read else 0) == want]
+
+	return rows, employees
 
 
 def _detail_row(row, depth):
@@ -160,6 +192,8 @@ def _detail_row(row, depth):
 		"name": row.name,
 		"timesheet": row.parent,
 		"label": row.activity_type or _("Time log"),
+		"activity_type": row.activity_type,
+		"description": row.description,
 		"from_time": row.from_time,
 		"hours": flt(row.hours),
 		"billing_hours": flt(row.billing_hours),
@@ -250,14 +284,18 @@ def _build_tree(tasks, rows_by_task, work_item_type=None):
 
 
 @frappe.whitelist()
-def get_project_billing(project, from_date=None, to_date=None, employee=None, work_item_type=None):
+def get_project_billing(
+	project, from_date=None, to_date=None, employee=None, work_item_type=None, is_updated=None
+):
 	_guard_billing_access()
 	_guard_project_access(project)
 
 	tasks = frappe.get_all(
 		"Task", filters={"project": project}, fields=TASK_FIELDS, limit_page_length=0
 	)
-	details, employees = _timesheet_rows(project, from_date, to_date, employee)
+	details, employees = _timesheet_rows(
+		project, from_date, to_date, employee, None if is_updated is None else sbool(is_updated)
+	)
 
 	rows_by_task = {}
 	unassigned = []

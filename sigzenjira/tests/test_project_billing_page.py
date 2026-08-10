@@ -31,12 +31,14 @@ def make_employee(first_name):
 	).insert()
 
 
-def make_submitted_timesheet(employee, task, project, hours, billing_hours=None):
+def make_submitted_timesheet(employee, task, project, hours, billing_hours=None, from_hour=9):
+	# from_hour exists because core refuses two timesheets for one employee whose
+	# hours overlap, so any test wanting a second sheet has to move it off 09:00.
 	row = {
 		"activity_type": "Execution",
 		"task": task,
 		"project": project,
-		"from_time": f"{today()} 09:00:00",
+		"from_time": f"{today()} {from_hour:02d}:00:00",
 		"hours": hours,
 	}
 	if billing_hours is not None:
@@ -242,6 +244,80 @@ class TestProjectBillingMarkAsRead(ProjectBillingCase):
 		)
 
 
+class TestProjectBillingIsUpdatedFilter(ProjectBillingCase):
+	def setup_two_rows(self, name):
+		employee = make_employee(f"{name} Tester")
+		self.project = make_project(name, is_billable=1)
+		self.task = make_task(f"{name} Task", "Task", project=self.project.name, is_billable=1)
+
+		self.read = make_submitted_timesheet(employee.name, self.task.name, self.project.name, hours=2)
+		self.unread = make_submitted_timesheet(
+			employee.name, self.task.name, self.project.name, hours=3, from_hour=14
+		)
+		set_mark_as_read([self.read.time_logs[0].name], 1)
+
+	def detail_names(self, **filters):
+		rows = get_project_billing(self.project.name, **filters)["rows"]
+		return {row["name"] for row in rows if row["row_type"] == "timesheet"}
+
+	def test_off_hides_the_rows_already_ticked_as_read(self):
+		self.setup_two_rows("PB Unread Only")
+
+		self.assertEqual(self.detail_names(is_updated=0), {self.unread.time_logs[0].name})
+
+	def test_on_shows_only_the_rows_ticked_as_read(self):
+		self.setup_two_rows("PB Read Only")
+
+		self.assertEqual(self.detail_names(is_updated=1), {self.read.time_logs[0].name})
+
+	def test_the_filter_does_not_narrow_the_employee_dropdown(self):
+		# Built before the filter runs, so somebody whose every row is read stays
+		# selectable rather than vanishing from a list they belong on.
+		self.setup_two_rows("PB Read Dropdown")
+
+		data = get_project_billing(self.project.name, is_updated=1)
+		self.assertEqual(len(data["employees"]), 1)
+
+	def test_omitting_the_filter_shows_both(self):
+		self.setup_two_rows("PB Read Unfiltered")
+
+		self.assertEqual(
+			self.detail_names(), {self.read.time_logs[0].name, self.unread.time_logs[0].name}
+		)
+
+
+class TestProjectBillingDetailColumns(ProjectBillingCase):
+	def test_a_timesheet_row_carries_what_the_table_columns_show(self):
+		employee = make_employee("PB Columns Tester")
+		project = make_project("PB Columns Project", is_billable=1)
+		task = make_task("PB Columns Task", "Task", project=project.name, is_billable=1)
+
+		timesheet = frappe.get_doc(
+			{
+				"doctype": "Timesheet",
+				"employee": employee.name,
+				"time_logs": [
+					{
+						"activity_type": "Execution",
+						"description": "Rebuilt the importer",
+						"task": task.name,
+						"project": project.name,
+						"from_time": f"{today()} 09:00:00",
+						"hours": 4,
+					}
+				],
+			}
+		).insert()
+		timesheet.submit()
+
+		rows = get_project_billing(project.name)["rows"]
+		detail = next(row for row in rows if row["row_type"] == "timesheet")
+
+		self.assertEqual(detail["activity_type"], "Execution")
+		self.assertIn("Rebuilt the importer", detail["description"])
+		self.assertEqual(detail["timesheet"], timesheet.name)
+
+
 class TestProjectBillingPermissions(ProjectBillingCase):
 	def make_unprivileged_user(self):
 		user = "pb.unprivileged@example.com"
@@ -402,6 +478,26 @@ class TestProjectBillingEmployeeFilter(ProjectBillingCase):
 		names = {row["name"] for row in get_project_billing(self.project.name)["employees"]}
 
 		self.assertEqual(names, {self.one.name, self.two.name})
+
+	def test_a_project_user_who_never_logged_time_is_still_offered(self):
+		self.setup_two_loggers("PB Emp Idle")
+		email = "pb-emp-idle-three@example.com"
+		if not frappe.db.exists("User", email):
+			frappe.get_doc(
+				{"doctype": "User", "email": email, "first_name": "PB Idle", "send_welcome_email": 0}
+			).insert(ignore_permissions=True)
+
+		idle = make_employee("PB Emp Idle Three")
+		idle.db_set("user_id", email)
+		# Submitting the timesheets wrote back to the Project, so the copy from
+		# setup is stale and saving it would trip TimestampMismatchError.
+		self.project.reload()
+		self.project.append("users", {"user": email})
+		self.project.save(ignore_permissions=True)
+
+		names = {row["name"] for row in get_project_billing(self.project.name)["employees"]}
+
+		self.assertEqual(names, {self.one.name, self.two.name, idle.name})
 
 	def test_filtering_by_employee_keeps_only_their_timesheet_rows(self):
 		self.setup_two_loggers("PB Emp Filter")
