@@ -83,11 +83,13 @@ doctype_js = {
 # ----------
 
 # add methods and filters to jinja environment
-# get_jenv_customization accepts a dotted path to a single function as well as
-# to a module, and registers it under its own __name__. Needed so the ECD
-# Notification records' cc field can call ecd_alert_manager_emails(doc.project) -
-# Notification.get_emails_from_template renders cc through frappe.render_template,
-# which builds its environment from get_jenv().
+# frappe.utils.jinja.get_jinja_hooks (whose inner get_obj_dict_from_paths resolves
+# a dotted path to either a module or a bare function) accepts a dotted path to a
+# single function as well as to a module, and registers it under its own
+# __name__. Needed so the ECD Notification records' cc field can call
+# ecd_alert_manager_emails(doc.project) - Notification.get_emails_from_template
+# renders cc through frappe.render_template, which builds its environment from
+# get_jenv().
 jinja = {"methods": ["sigzenjira.permission.project_user.ecd_alert_manager_emails"]}
 
 # Installation

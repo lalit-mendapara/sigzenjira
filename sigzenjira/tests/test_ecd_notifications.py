@@ -1,7 +1,9 @@
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_days, nowdate
 
 from sigzenjira.permission.project_user import ecd_alert_manager_emails
+from sigzenjira.setup import create_ecd_notifications
 
 MANAGER = "test_ecd_manager@example.com"
 MEMBER = "test_ecd_member@example.com"
@@ -86,10 +88,14 @@ class TestEcdAlertManagerEmails(IntegrationTestCase):
 		)
 		self.assertEqual(ecd_alert_manager_emails(project.name), "")
 
+	def test_cc_template_renders_through_jinja(self):
+		# The hooks.py jinja registration is a dotted string resolved by name. If it
+		# breaks, render_template raises UndefinedError inside Notification's send
+		# path, where a bare except swallows it - every alert then dies silently.
+		from sigzenjira.setup import ECD_MANAGER_CC
 
-from frappe.utils import add_days, nowdate
+		self.assertEqual(frappe.render_template(ECD_MANAGER_CC, {"doc": frappe._dict(project=None)}), "")
 
-from sigzenjira.setup import create_ecd_notifications
 
 TASK_STAGES = {
 	"Task ECD Due Tomorrow": 1,

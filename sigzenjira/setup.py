@@ -167,8 +167,11 @@ ECD_MANAGER_CC = "{{ ecd_alert_manager_emails(doc.project) }}"
 # get_documents_for_today sets diff_days = days_in_advance, negates it for
 # "Days After", and matches documents dated nowdate() + diff_days. So for an ECD
 # of the 13th: Days Before/1 fires on the 12th, Days After/0 on the 13th,
-# Days After/1 on the 14th. Both ECD fields are Date fields with no time, so
-# "24 hours before" is really midnight of the previous calendar day.
+# Days After/1 on the 14th. Issue.custom_issue_ecd is a Date field with no time;
+# Task.exp_end_date is a Datetime (see work_board.py:_ecd_range_conditions), but
+# frappe.format(..., "Date") in the message and the day-range filter in
+# get_documents_for_today both absorb that, so "24 hours before" still lands at
+# midnight of the previous calendar day for both doctypes.
 ECD_ALERT_DOCTYPES = [
 	{
 		"document_type": "Task",
@@ -209,6 +212,12 @@ ECD_ALERT_STAGES = [
 ]
 
 
+# frappe.db.exists below makes this a create-only, run-once-per-record guard: an
+# admin who later disables or edits one of the six generated records keeps that
+# change permanently, since a re-run (a fresh install, or this same function
+# called again) skips any name that already exists. A future correction to
+# ECD_ALERT_DOCTYPES / ECD_ALERT_STAGES therefore needs a patch that explicitly
+# *updates* the existing records - re-calling this function will not pick it up.
 def create_ecd_notifications():
 	for document in ECD_ALERT_DOCTYPES:
 		for stage in ECD_ALERT_STAGES:
@@ -241,14 +250,22 @@ def create_ecd_notifications():
 					"message_type": "HTML",
 					"subject": f"ECD {stage['stage'].lower()}: {{{{ doc.name }}}} - {{{{ doc.subject }}}}",
 					"condition": document["condition"],
+					# Left explicit rather than relying on the doctype default: if that
+					# default ever moves off "Python", before_save's
+					# remove_invalid_condition() silently nulls `condition` above, and
+					# every Completed/Cancelled/Resolved/Closed item starts getting
+					# overdue mail again.
+					"condition_type": "Python",
 					"message": (
 						f"<p>{document['document_type']} <b>{{{{ doc.name }}}}</b> - "
 						f"{{{{ doc.subject }}}} {stage['headline']}.</p>"
 						f"<p>ECD: {ecd}<br>Status: {{{{ doc.status }}}}</p>"
 						f'<p><a href="/app/{document["route"]}/{{{{ doc.name }}}}">{{{{ doc.name }}}}</a></p>'
 					),
-					# Managers get the mail as CC only - send_system_notification
-					# builds its Notification Log from the recipients list, not CC.
+					# Managers ride along as CC, and DO get the Desk bell too:
+					# create_system_notification's recipients list is recipients + cc +
+					# bcc (notification.py), so CC is included in the Notification Log,
+					# not just the mail.
 					"recipients": [{"cc": ECD_MANAGER_CC}],
 				}
 			).insert(ignore_permissions=True)
