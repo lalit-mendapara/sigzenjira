@@ -47,3 +47,4 @@ sigzenjira.patches.blank_pulse_billing_section_label
 sigzenjira.patches.add_project_billing_page
 sigzenjira.patches.show_billing_split_under_completed
 sigzenjira.patches.relabel_set_work_item_type_field
+sigzenjira.patches.add_ecd_due_notifications

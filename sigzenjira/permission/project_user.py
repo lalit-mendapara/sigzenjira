@@ -30,3 +30,12 @@ def get_project_approvers(project):
 		},
 		pluck="user",
 	)
+
+
+def ecd_alert_manager_emails(project):
+	# Jinja-facing wrapper for the "Task ECD Due" / "Issue ECD Due" Notification
+	# cc field, which is rendered as a template and then split on commas. Reuses
+	# get_project_approvers so "manager on this project" has one definition -
+	# change the flag there and the AHR routing and this alert both follow.
+	# A User docname is the email address, so no lookup is needed.
+	return ",".join(get_project_approvers(project))
