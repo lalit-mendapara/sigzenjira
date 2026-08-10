@@ -5,6 +5,7 @@ from frappe.utils import add_days, today
 from sigzenjira.sigzenjira.report.project_hour_consumption.project_hour_consumption import execute
 
 from .test_status_cascade import make_task, make_task_under_story
+from sigzenjira.tests import ensure_test_employment_type
 
 REPORT_PO = "test_hcr_po@example.com"
 REPORT_OUTSIDER = "test_hcr_outsider@example.com"
@@ -29,6 +30,8 @@ def make_billable_project(name):
 	return frappe.get_doc(
 		{
 			"doctype": "Project",
+			# project_type is mandatory on this bench (a Property Setter, not app code).
+			"project_type": "Internal",
 			"project_name": f"{name} {frappe.generate_hash(length=6)}",
 			"custom_project_is_billable": 1,
 		}
@@ -100,6 +103,7 @@ def make_employee(first_name):
 			"gender": "Male",
 			"date_of_birth": "1995-01-01",
 			"date_of_joining": "2024-01-01",
+			"employment_type": ensure_test_employment_type(),
 		}
 	).insert()
 

@@ -3,7 +3,7 @@ import json
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-from sigzenjira.custom_field import get_custom_fields
+from sigzenjira.custom_field import CUSTOM_FIELDS
 from sigzenjira.custom_permission import create_custom_docperms
 from sigzenjira.dashboard.pm_dashboard import create_pm_dashboard
 from sigzenjira.property_setter import apply_property_setters
@@ -11,10 +11,10 @@ from sigzenjira.property_setter import apply_property_setters
 
 def sync_custom_fields():
 	# Every Custom Field this app owns, (re-)created from the single declarative
-	# source. Split out of after_install so a field added later can be pushed to
-	# an existing site with `bench --site <site> execute
-	# sigzenjira.setup.sync_custom_fields` before exporting fixtures.
-	create_custom_fields(get_custom_fields(), update=True)
+	# source. Split out of after_install so a patch (or `bench --site <site>
+	# execute sigzenjira.setup.sync_custom_fields`) can push a later addition to
+	# an existing site.
+	create_custom_fields(CUSTOM_FIELDS, update=True)
 
 
 def after_install():
@@ -25,6 +25,7 @@ def after_install():
 	create_additional_hours_request_notifications()
 	create_pm_dashboard()
 	add_work_board_workspace_shortcut()
+	add_project_billing_workspace_shortcut()
 	frappe.clear_cache(doctype="Task")
 	frappe.clear_cache(doctype="Issue")
 	frappe.clear_cache(doctype="Timesheet Detail")
@@ -160,11 +161,18 @@ def get_work_board_workspace_shortcut():
 	}
 
 
-def add_work_board_workspace_shortcut():
+def get_project_billing_workspace_shortcut():
+	return {
+		"label": "Project Billing",
+		"type": "Page",
+		"link_to": "project-billing",
+	}
+
+
+def add_workspace_shortcut(shortcut, block_id):
 	# Same LinkValidationError landmine as add_pm_dashboard_workspace_shortcut
 	# (dashboard/pm_dashboard.py): the child row and the `content` block are
 	# written directly, never through ws.save().
-	shortcut = get_work_board_workspace_shortcut()
 	if not frappe.db.exists(
 		"Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}
 	):
@@ -187,9 +195,17 @@ def add_work_board_workspace_shortcut():
 	if not already_has_block:
 		content.append(
 			{
-				"id": "sigzenjiraWorkBoardShortcut",
+				"id": block_id,
 				"type": "shortcut",
 				"data": {"shortcut_name": shortcut["label"], "col": 4},
 			}
 		)
 		frappe.db.set_value("Workspace", "Project Management", "content", json.dumps(content))
+
+
+def add_work_board_workspace_shortcut():
+	add_workspace_shortcut(get_work_board_workspace_shortcut(), "sigzenjiraWorkBoardShortcut")
+
+
+def add_project_billing_workspace_shortcut():
+	add_workspace_shortcut(get_project_billing_workspace_shortcut(), "sigzenjiraProjectBillingShortcut")

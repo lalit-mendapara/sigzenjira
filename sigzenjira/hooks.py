@@ -5,89 +5,6 @@ app_description = "Erpnext extended Project management app"
 app_email = "lalit@gmail.com"
 app_license = "mit"
 
-fixtures = [
-	{"doctype": "Custom Field", "filters": [["dt", "in", ["Task", "Project User", "Project", "Issue"]]]},
-	{"doctype": "Property Setter", "filters": [["doc_type", "in", ["Task", "Issue", "Timesheet Detail"]]]},
-	{
-		"doctype": "Report",
-		"filters": [
-			[
-				"report_name",
-				"in",
-				[
-					"Open Tasks Count",
-					"Overdue Tasks Count",
-					"Pending Extra Hours Count",
-					"Extra Hours Approved Sum",
-					"Hours This Week Sum",
-					"Open Issues Count",
-				],
-			]
-		],
-	},
-	{
-		"doctype": "Number Card",
-		"filters": [
-			[
-				"label",
-				"in",
-				[
-					"Open Tasks",
-					"Task Overdue Count",
-					"Pending Extra Hours Approvals",
-					"Extra Hours Approved",
-					"Hours Logged This Week",
-					"Open Issues",
-					"My Open Tasks",
-					"My Overdue Tasks",
-					"My Hours This Week",
-					"My Pending Extra Hours Requests",
-					"My Approved Extra Hours",
-					"My Open Issues",
-				],
-			]
-		],
-	},
-	{
-		"doctype": "Dashboard Chart",
-		"filters": [
-			[
-				"chart_name",
-				"in",
-				[
-					"Tasks by Status",
-					"Tasks by Work Item Type Breakdown",
-					"Issues by Status",
-					"Workload Distribution",
-					"Hours Logged Trend",
-					"My Tasks by Status",
-					"My Issues by Status",
-					"My Hours Trend",
-				],
-			]
-		],
-	},
-	{"doctype": "Dashboard", "filters": [["dashboard_name", "=", "Project Management Dashboard"]]},
-	{"doctype": "Custom DocPerm", "filters": [["parent", "in", ["Task", "Task Template"]]]},
-	# Re-applied force=True on every migrate like every other fixture, so the
-	# subject/message here are the source of truth - edit setup.py and
-	# re-export rather than tweaking the body in Desk, which a migrate undoes.
-	{
-		"doctype": "Notification",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"Extra Hours Request Submitted",
-					"Extra Hours Request Approved",
-					"Extra Hours Request Rejected",
-				],
-			]
-		],
-	},
-]
-
 # Apps
 # ------------------
 
@@ -109,7 +26,9 @@ fixtures = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/sigzenjira/css/sigzenjira.css"
-# app_include_js = "/assets/sigzenjira/js/sigzenjira.js"
+# ?v= is a manual cache-buster: plain (non-bundle) app_include_js paths get no ?ver= from
+# frappe and are served with Cache-Control max-age=43200. Bump v on every edit to this file.
+app_include_js = "/assets/sigzenjira/js/notification_count.js?v=2"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/sigzenjira/css/sigzenjira.css"
@@ -237,6 +156,7 @@ doc_events = {
 			"sigzenjira.events.task.validate_work_item_type_permission",
 			"sigzenjira.events.task.validate_hierarchy",
 			"sigzenjira.events.task.validate_parent_task_is_immutable",
+			"sigzenjira.events.task.suffix_story_subject_on_manual_task",
 			"sigzenjira.events.task.validate_one_story_per_issue",
 			"sigzenjira.events.task.validate_task_split_expected_hours_permission",
 			"sigzenjira.events.task.validate_task_split_assign_permission",
@@ -298,7 +218,10 @@ doc_events = {
 			"sigzenjira.events.timesheet.force_is_billable_from_task",
 			"sigzenjira.events.timesheet.resync_billing_hours",
 		],
-		"validate": "sigzenjira.events.timesheet.validate_task_type",
+		"validate": [
+			"sigzenjira.events.timesheet.validate_task_type",
+			"sigzenjira.events.timesheet.set_row_non_billable_hours",
+		],
 		"on_submit": "sigzenjira.events.timesheet.rollup_actual_time",
 		"on_cancel": "sigzenjira.events.timesheet.rollup_actual_time",
 	},

@@ -21,6 +21,7 @@ PERM_FLAG_FIELDS = [
 
 def create_custom_docperms():
 	create_task_projects_manager_docperm()
+	create_task_role_docperms()
 	create_task_costing_permlevel_docperms()
 	create_task_template_director_po_docperm()
 	create_task_template_employee_docperm()
@@ -69,6 +70,57 @@ def create_task_projects_manager_docperm():
 			"export": 1,
 		}
 	).insert(ignore_permissions=True)
+
+
+# Core Task grants Projects User / HR User / HR Manager only. These three are
+# sigzenjira's own roles: Director and Product Owner run the whole org and bypass
+# project scoping (PROJECT_SCOPE_BYPASS_ROLES, permission/project.py); Employee is
+# every assignee, who needs create+write to raise and work a Sub-task but must not
+# delete one or pull the list into a report. Every Check flag is spelled out - one
+# left out of the dict comes back 1, not 0.
+FULL_TASK_PERMS = {
+	"read": 1,
+	"write": 1,
+	"create": 1,
+	"delete": 1,
+	"report": 1,
+	"export": 1,
+	"share": 1,
+	"email": 1,
+	"print": 1,
+}
+TASK_ROLE_DOCPERMS = {
+	"Director": FULL_TASK_PERMS,
+	"Product Owner": FULL_TASK_PERMS,
+	"Employee": {
+		"read": 1,
+		"write": 1,
+		"create": 1,
+		"delete": 0,
+		"report": 0,
+		"export": 1,
+		"share": 0,
+		"email": 0,
+		"print": 0,
+	},
+}
+
+
+def create_task_role_docperms():
+	for role, flags in TASK_ROLE_DOCPERMS.items():
+		if frappe.db.exists("Custom DocPerm", {"parent": "Task", "role": role, "permlevel": 0}):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "Custom DocPerm",
+				"parent": "Task",
+				"parenttype": "DocType",
+				"parentfield": "permissions",
+				"role": role,
+				"permlevel": 0,
+				**flags,
+			}
+		).insert(ignore_permissions=True)
 
 
 COSTING_PERMLEVEL_ROLES = ("Projects Manager", "Director", "Product Owner")

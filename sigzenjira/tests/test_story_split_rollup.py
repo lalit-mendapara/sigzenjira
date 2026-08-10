@@ -459,6 +459,30 @@ class TestStorySplitRollup(IntegrationTestCase):
 		# the declared 10h ceiling stands; 7h of it is now allocated
 		self.assertEqual(story.expected_time, 10)
 
+	def test_manual_task_subject_matches_the_split_generated_shape(self):
+		# Both doors into a Story produce "<item> - <Story subject>" on the Task,
+		# while the split row keeps the bare item text either way.
+		epic = make_task("SR Subject Epic", "Epic", expected_time=50)
+		story = make_task("SR Subject Story", "Story", epic.name, expected_time=10)
+		story.append("custom_task_task_split", {"task_item": "Split Item", "expected_hours": 4})
+		story.save()
+		story.reload()
+
+		split_task = frappe.get_doc("Task", story.custom_task_task_split[0].generated_task)
+		self.assertEqual(split_task.subject, "Split Item - SR Subject Story")
+
+		manual = make_task("Typed Item", "Task", story.name, expected_time=3)
+		self.assertEqual(manual.subject, "Typed Item - SR Subject Story")
+
+		story.reload()
+		row = next(r for r in story.custom_task_task_split if r.generated_task == manual.name)
+		self.assertEqual(row.task_item, "Typed Item")
+
+		# Re-saving must not stack a second suffix.
+		manual.reload()
+		manual.save()
+		self.assertEqual(manual.subject, "Typed Item - SR Subject Story")
+
 	def test_manual_task_breaching_a_pinned_story_budget_is_blocked(self):
 		epic = make_task("SR Mirror Pin Epic", "Epic", expected_time=50)
 		story = make_task("SR Mirror Pin Story", "Story", epic.name)

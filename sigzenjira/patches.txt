@@ -5,16 +5,20 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 #
-# Only three things belong here:
-#   1. data migrations (backfill / transform existing rows)
-#   2. deletions (fixtures only insert+update, they never remove)
-#   3. docs that aren't in `fixtures` (hooks.py) - Workflow, Workspace
+# This app has NO `fixtures` hook - nothing is re-applied automatically on
+# migrate. Every customization is declared in Python (custom_field.py,
+# property_setter.py, custom_permission.py, dashboard/pm_dashboard.py,
+# setup.py), created on a fresh site by setup.py:after_install, and pushed to
+# already-installed sites by a patch listed below. One patch per change:
+# add/edit the declaration, then add a patch that applies just that change.
 #
-# Everything else - Custom Field, Property Setter, Custom DocPerm, Report,
-# Number Card, Dashboard Chart, Dashboard, Notification - is a fixture and is
-# re-applied on EVERY `bench migrate` (frappe/utils/fixtures.py, force=True).
-# Edit custom_field.py / setup.py, run `bench export-fixtures`, commit the
-# JSON. Do not add a patch for it.
+# So everything belongs here - Custom Field, Property Setter, Custom DocPerm,
+# Report, Number Card, Dashboard Chart, Dashboard, Notification, Workflow,
+# Workspace - plus data migrations (backfill/transform) and deletions.
+#
+# Patches are recorded in `Patch Log` and run exactly once per site, so a patch
+# must stay idempotent but will not re-run to pick up a later edit to the dict
+# it reads. Change the dict again, ship another patch.
 sigzenjira.patches.rename_custom_fields_with_doctype_prefix
 sigzenjira.patches.normalize_custom_field_names
 sigzenjira.patches.add_additional_hours_request_workflow
@@ -34,3 +38,11 @@ sigzenjira.patches.backfill_all_time_assignees
 sigzenjira.patches.remove_assign_to_user_fields
 sigzenjira.patches.backfill_task_issue_ecd
 sigzenjira.patches.drop_split_work_layout_fields
+sigzenjira.patches.apply_customizations_from_code
+sigzenjira.patches.move_project_is_billable_out_of_pulse_section
+sigzenjira.patches.add_billable_hours_rollup_fields
+sigzenjira.patches.backfill_billable_hours_rollup
+sigzenjira.patches.hide_pulse_billable_fields
+sigzenjira.patches.blank_pulse_billing_section_label
+sigzenjira.patches.add_project_billing_page
+sigzenjira.patches.show_billing_split_under_completed

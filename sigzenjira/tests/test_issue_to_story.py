@@ -40,9 +40,10 @@ class TestIssueToStory(IntegrationTestCase):
 		self.assertEqual(task.custom_task_issue_type, "Bug")
 
 	def test_make_story_maps_project_from_issue(self):
-		project = frappe.get_doc({"doctype": "Project", "project_name": "Issue2Story Project"}).insert(
-			ignore_permissions=True
-		)
+		# project_type is mandatory on this bench (a Property Setter, not app code).
+		project = frappe.get_doc(
+			{"doctype": "Project", "project_name": "Issue2Story Project", "project_type": "Internal"}
+		).insert(ignore_permissions=True)
 		issue = make_issue("Needs project mapped", project=project.name)
 
 		task = frappe.get_doc("Task", make_story(issue.name))

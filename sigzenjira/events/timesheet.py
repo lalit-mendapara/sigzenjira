@@ -67,6 +67,23 @@ def worked_hours(row):
 	return row.hours
 
 
+def set_row_non_billable_hours(doc, method=None):
+	# The unbilled remainder of a split whose halves core already stores: `hours`
+	# is everything worked, core's `billing_hours` the billed share
+	# (timesheet_detail.py:update_billing_hours, which also zeroes billing_hours
+	# outright when the row isn't billable). Stored rather than left derived so
+	# the billing page can group and sum on it in SQL.
+	#
+	# validate, not before_validate: frappe runs doc_event handlers after the
+	# controller's own method (Document.hook), and core computes billing_hours
+	# inside Timesheet.validate() -> calculate_hours -> update_billing_hours - so
+	# this is the first point where billing_hours is final. force_is_billable_from
+	# _task has to sit before that same call, which is why the two are split
+	# across before_validate and validate rather than run together.
+	for row in doc.time_logs:
+		row.custom_timesheet_detail_non_billable_hours = flt(row.hours) - flt(row.billing_hours)
+
+
 def validate_task_type(doc, method):
 	# Only Task and Sub-task are real "do the work here" leaves in our
 	# hierarchy. Epic/Story are pure groupings — actual_time on them is a
@@ -147,12 +164,57 @@ def recompute_actual_time(task_name):
 		recompute_actual_time(parent_task)
 
 
+def recompute_project_billable_hours(project):
+	# Summed straight off Timesheet Detail, not off the Project's Tasks: a parent
+	# Task's custom_task_billable_hours already contains every child's
+	# (recompute_actual_time), so adding Tasks up would count the same hour once
+	# per level of the hierarchy. Going to the rows also picks up time logged
+	# against a Project with no Task at all, which no Task rollup can see.
+	#
+	# The row's own `project` is what's summed, not its Task's - core stamps it on
+	# the row at entry time and leaves it there, so hours stay counted against the
+	# Project they were booked to even if the Task is later moved.
+	if not project:
+		return
+
+	hours, billing_hours = frappe.db.sql(
+		"""
+		select sum(hours), sum(billing_hours)
+		from `tabTimesheet Detail` where project = %s and docstatus = 1
+		""",
+		project,
+	)[0]
+
+	frappe.db.set_value(
+		"Project",
+		project,
+		{
+			# Core zeroes billing_hours on a non-billable row, so this sum is the
+			# billed share and the subtraction below is everything else - the same
+			# shape as the Task-level pair in recompute_actual_time.
+			"custom_project_billable_hours": flt(billing_hours),
+			"custom_project_non_billable_hours": flt(hours) - flt(billing_hours),
+		},
+		update_modified=False,
+	)
+
+
 def rollup_actual_time(doc, method):
 	seen = set()
+	projects = set()
 	for row in doc.time_logs:
 		if row.task and row.task not in seen:
 			seen.add(row.task)
 			recompute_actual_time(row.task)
+		# Falls back to the Task's Project only when the row carries none: core
+		# fetches project from task on entry, but a row built programmatically
+		# (tests, imports) can arrive with just the task.
+		project = row.project or (frappe.db.get_value("Task", row.task, "project") if row.task else None)
+		if project:
+			projects.add(project)
+
+	for project in projects:
+		recompute_project_billable_hours(project)
 
 
 def rollup_actual_time_on_reparent(doc, method):

@@ -165,6 +165,8 @@ class TestPhase6Regression(IntegrationTestCase):
 		project = frappe.get_doc(
 			{
 				"doctype": "Project",
+				# project_type is mandatory on this bench (a Property Setter, not app code).
+				"project_type": "Internal",
 				"project_name": "PH6 Notify Project",
 				"users": [{"user": approver, "custom_project_user_approve_extra_hours": 1}],
 			}

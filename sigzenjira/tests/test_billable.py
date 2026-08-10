@@ -5,6 +5,7 @@ from frappe.utils import today
 from sigzenjira.events.billable import BILLABLE_FIELDS
 from sigzenjira.events.issue import make_story
 from sigzenjira.events.task import create_task_without_hours
+from sigzenjira.tests import ensure_test_employment_type
 
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
 # a doctype folder (frappe/tests/classes/integration_test_case.py:59 raises
@@ -468,6 +469,8 @@ class TestBillablePermission(IntegrationTestCase):
 			orphan = frappe.get_doc(
 				{
 					"doctype": "Project",
+					# project_type is mandatory on this bench (a Property Setter, not app code).
+					"project_type": "Internal",
 					"project_name": "BC New Gate Orphan Project",
 					"custom_project_is_billable": 1,
 				}
@@ -607,6 +610,7 @@ def make_billable_test_employee():
 			"gender": "Male",
 			"date_of_birth": "1995-01-01",
 			"date_of_joining": "2024-01-01",
+			"employment_type": ensure_test_employment_type(),
 		}
 	).insert()
 
@@ -679,3 +683,111 @@ class TestBillableTimesheetLock(IntegrationTestCase):
 	def test_timesheet_detail_is_billable_is_read_only_when_task_set(self):
 		meta_field = frappe.get_meta("Timesheet Detail").get_field("is_billable")
 		self.assertEqual(meta_field.read_only_depends_on, "eval:doc.task")
+
+
+class TestBillableHoursSplit(IntegrationTestCase):
+	def make_timesheet(self, employee, task, hours, billing_hours=None, project=None, submit=False):
+		row = {
+			"activity_type": "Execution",
+			"task": task,
+			"project": project,
+			"from_time": f"{today()} 09:00:00",
+			"hours": hours,
+		}
+		if billing_hours is not None:
+			row["billing_hours"] = billing_hours
+
+		timesheet = frappe.get_doc(
+			{"doctype": "Timesheet", "employee": employee, "time_logs": [row]}
+		).insert()
+		if submit:
+			timesheet.submit()
+		return timesheet
+
+	def test_billable_row_defaults_to_billing_every_hour_worked(self):
+		employee = make_billable_test_employee()
+		project = make_project("BC Split Full", is_billable=1)
+		task = make_task("BC Split Full Task", "Task", project=project.name, is_billable=1)
+
+		timesheet = self.make_timesheet(employee.name, task.name, hours=4)
+		row = timesheet.time_logs[0]
+
+		self.assertEqual(row.billing_hours, 4)
+		self.assertEqual(row.custom_timesheet_detail_non_billable_hours, 0)
+
+	def test_one_row_can_hold_both_billable_and_non_billable_hours(self):
+		# The case the whole split exists for: a billable Task where only part of
+		# the time logged against it is actually billed.
+		employee = make_billable_test_employee()
+		project = make_project("BC Split Partial", is_billable=1)
+		task = make_task("BC Split Partial Task", "Task", project=project.name, is_billable=1)
+
+		timesheet = self.make_timesheet(employee.name, task.name, hours=5, billing_hours=3)
+		row = timesheet.time_logs[0]
+
+		self.assertEqual(row.billing_hours, 3)
+		self.assertEqual(row.custom_timesheet_detail_non_billable_hours, 2)
+
+	def test_non_billable_task_puts_every_hour_in_non_billable(self):
+		employee = make_billable_test_employee()
+		project = make_project("BC Split Free", is_billable=0)
+		task = make_task("BC Split Free Task", "Task", project=project.name, is_billable=0)
+
+		timesheet = self.make_timesheet(employee.name, task.name, hours=6, billing_hours=6)
+		row = timesheet.time_logs[0]
+
+		# billing_hours was asked for on a non-billable task and core zeroed it
+		# (timesheet_detail.py:update_billing_hours), so the whole 6 is unbilled.
+		self.assertEqual(row.is_billable, 0)
+		self.assertEqual(row.billing_hours, 0)
+		self.assertEqual(row.custom_timesheet_detail_non_billable_hours, 6)
+
+
+class TestProjectBillableRollup(IntegrationTestCase):
+	def test_submitting_a_timesheet_rolls_hours_up_to_the_project(self):
+		employee = make_billable_test_employee()
+		project = make_project("BC Rollup Split", is_billable=1)
+		task = make_task("BC Rollup Split Task", "Task", project=project.name, is_billable=1)
+
+		TestBillableHoursSplit.make_timesheet(
+			self, employee.name, task.name, hours=5, billing_hours=3, project=project.name, submit=True
+		)
+
+		self.assertEqual(frappe.db.get_value("Project", project.name, "custom_project_billable_hours"), 3)
+		self.assertEqual(
+			frappe.db.get_value("Project", project.name, "custom_project_non_billable_hours"), 2
+		)
+
+	def test_project_total_does_not_double_count_a_subtask_under_a_task(self):
+		# The reason recompute_project_billable_hours sums Timesheet Detail rows
+		# instead of Tasks: the parent Task's own custom_task_billable_hours
+		# already contains the Sub-task's, so adding Tasks up would count the
+		# same hour twice.
+		employee = make_billable_test_employee()
+		project = make_project("BC Rollup Nested", is_billable=1)
+		parent = make_task("BC Rollup Parent", "Task", project=project.name, is_billable=1)
+		child = make_task(
+			"BC Rollup Child", "Sub-task", parent_task=parent.name, project=project.name, is_billable=1
+		)
+
+		TestBillableHoursSplit.make_timesheet(
+			self, employee.name, child.name, hours=4, project=project.name, submit=True
+		)
+
+		self.assertEqual(frappe.db.get_value("Task", parent.name, "custom_task_billable_hours"), 4)
+		self.assertEqual(frappe.db.get_value("Project", project.name, "custom_project_billable_hours"), 4)
+
+	def test_cancelling_a_timesheet_takes_the_hours_back_off_the_project(self):
+		employee = make_billable_test_employee()
+		project = make_project("BC Rollup Cancel", is_billable=1)
+		task = make_task("BC Rollup Cancel Task", "Task", project=project.name, is_billable=1)
+
+		timesheet = TestBillableHoursSplit.make_timesheet(
+			self, employee.name, task.name, hours=5, billing_hours=3, project=project.name, submit=True
+		)
+		timesheet.cancel()
+
+		self.assertEqual(frappe.db.get_value("Project", project.name, "custom_project_billable_hours"), 0)
+		self.assertEqual(
+			frappe.db.get_value("Project", project.name, "custom_project_non_billable_hours"), 0
+		)

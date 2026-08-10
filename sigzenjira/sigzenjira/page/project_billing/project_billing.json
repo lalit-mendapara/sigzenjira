@@ -1,0 +1,14 @@
+{
+ "doctype": "Page",
+ "module": "Sigzenjira",
+ "name": "project-billing",
+ "page_name": "project-billing",
+ "title": "Project Billing",
+ "standard": "Yes",
+ "roles": [
+  {"role": "Director"},
+  {"role": "Product Owner"},
+  {"role": "Projects Manager"},
+  {"role": "System Manager"}
+ ]
+}

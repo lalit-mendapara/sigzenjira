@@ -13,6 +13,7 @@ from sigzenjira.sigzenjira.page.work_board.work_board import (
 )
 
 from .test_status_cascade import make_task_under_story
+from sigzenjira.tests import ensure_test_employment_type
 
 MEMBER_USER = "work_board_member@example.com"
 IDLE_USER = "work_board_idle@example.com"
@@ -364,6 +365,7 @@ class TestWorkBoardDepartmentView(IntegrationTestCase):
 					"gender": "Female",
 					"date_of_birth": "1995-01-01",
 					"date_of_joining": "2024-01-01",
+					"employment_type": ensure_test_employment_type(),
 					"department": cls.department,
 					"user_id": cls.user,
 				}

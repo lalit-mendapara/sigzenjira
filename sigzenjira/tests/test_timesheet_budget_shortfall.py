@@ -3,6 +3,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
 from sigzenjira.events.timesheet import check_over_budget
+from sigzenjira.tests import ensure_test_employment_type
 
 
 class TestTimesheetBudgetRemaining(IntegrationTestCase):
@@ -18,6 +19,7 @@ class TestTimesheetBudgetRemaining(IntegrationTestCase):
 				"gender": "Male",
 				"date_of_birth": "1995-01-01",
 				"date_of_joining": "2024-01-01",
+				"employment_type": ensure_test_employment_type(),
 			}
 		).insert()
 
@@ -67,6 +69,7 @@ class TestTimesheetBudgetRemaining(IntegrationTestCase):
 				"gender": "Male",
 				"date_of_birth": "1995-01-01",
 				"date_of_joining": "2024-01-01",
+				"employment_type": ensure_test_employment_type(),
 			}
 		).insert()
 

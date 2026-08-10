@@ -3,6 +3,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
 from .test_status_cascade import make_task, make_task_under_story
+from sigzenjira.tests import ensure_test_employment_type
 
 
 def make_employee(first_name):
@@ -15,6 +16,7 @@ def make_employee(first_name):
 			"gender": "Male",
 			"date_of_birth": "1995-01-01",
 			"date_of_joining": "2024-01-01",
+			"employment_type": ensure_test_employment_type(),
 		}
 	).insert()
 

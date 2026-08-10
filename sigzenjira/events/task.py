@@ -177,6 +177,20 @@ def _manual_task_under_story(doc):
 	return doc.parent_task
 
 
+def suffix_story_subject_on_manual_task(doc, method):
+	# generate_tasks_from_split names its generated Tasks "<item> - <Story
+	# subject>". A Task typed straight into the Task form (or the list view, or
+	# the Work Board) under the same Story carried only what the user typed, so
+	# the same work ended up with two different subject shapes depending on which
+	# door it came through. Match them at creation only - a later re-save must
+	# not stack a second suffix, and an existing Task's subject is not rewritten
+	# under the user.
+	if not doc.is_new() or not _manual_task_under_story(doc):
+		return
+
+	doc.subject = f"{doc.subject} - {frappe.db.get_value('Task', doc.parent_task, 'subject')}"
+
+
 def create_split_row_for_manual_task(doc, method):
 	# A Task created outside the grid - the Task form's "Create Task" button,
 	# the list view, the Work Board, the API - gets a row of its own rather
@@ -202,7 +216,10 @@ def create_split_row_for_manual_task(doc, method):
 	story.append(
 		"custom_task_task_split",
 		{
-			"task_item": doc.subject,
+			# The suffix suffix_story_subject_on_manual_task just put on the Task
+			# belongs to the Task's subject, not to the grid - the split path
+			# stores the bare item text here, so strip it back off to match.
+			"task_item": doc.subject.removesuffix(f" - {story.subject}"),
 			# Task.description is a Text Editor (HTML), the row's is Small Text -
 			# handing the markup over unchanged shows the user raw
 			# <div class="ql-editor"> soup in the grid.

@@ -213,9 +213,15 @@ function lock_story_to_template_only(frm) {
 				frm.set_df_property(df.fieldname, "read_only", 1);
 			}
 		});
-		// The split grid stays writable so they can break their own work down,
-		// but rows only go one way - removing one deletes the generated Task
-		// and its Sub-tasks (validate_task_split_row_deletion throws server-side).
+		// Splitting a Story into rows is a plan decision, so the grid's Add Row
+		// and Delete buttons are both hidden without Set Work Item Type -
+		// picking a Task Template stays the way an Employee fills this table
+		// (apply_task_template appends rows in code, so it isn't affected).
+		// ponytail: client-side only - the server still accepts added rows,
+		// deliberately, since blocking them would also break the template flow;
+		// deletion is the one the server hard-stops
+		// (validate_task_split_row_deletion).
+		frm.fields_dict.custom_task_task_split.grid.df.cannot_add_rows = 1;
 		frm.fields_dict.custom_task_task_split.grid.df.cannot_delete_rows = 1;
 		frm.refresh_fields();
 	});
@@ -468,6 +474,57 @@ frappe.ui.form.on("Task", {
 
 	custom_task_task_template: apply_task_template,
 });
+
+// Core's Assign To dialog (frappe/public/js/frappe/form/sidebar/assign_to.js)
+// hardcodes its user list to every enabled System User and exposes no query
+// hook, so the only way in is to wrap get_fields and swap that one field's
+// get_data. Narrowed to the same list the split grid's Assign dialog already
+// uses (get_project_assignable_users, events/task.py) so both doors into
+// assignment offer the same people. UI narrowing only - the User Group
+// shortcut in the same dialog, a bulk list-view assign and the API all bypass
+// it, so this is a better picker, not enforcement.
+const core_assign_to_dialog_get_fields = frappe.ui.form.AssignToDialog.prototype.get_fields;
+frappe.ui.form.AssignToDialog.prototype.get_fields = function () {
+	const fields = core_assign_to_dialog_get_fields.call(this);
+	const doc = this.frm && this.frm.doc;
+	if (
+		!doc ||
+		doc.doctype !== "Task" ||
+		doc.custom_task_work_item_type !== "Task" ||
+		!doc.project
+	) {
+		return fields;
+	}
+
+	// The dialog is built once per form and kept (frm.assign_to.assign_to), so
+	// cache the team against the project it was fetched for rather than per
+	// dialog - a re-picked project then refetches instead of serving stale users.
+	let cached_project = null;
+	let project_users = [];
+	fields.find((field) => field.fieldname === "assign_to").get_data = function (txt) {
+		const query = (txt || "").toLowerCase();
+		const match = (users) =>
+			users.filter(
+				(user) =>
+					user.value.toLowerCase().includes(query) ||
+					(user.description || "").toLowerCase().includes(query)
+			);
+
+		if (cached_project === doc.project) {
+			return match(project_users);
+		}
+		return frappe
+			.xcall("sigzenjira.events.task.get_project_assignable_users", {
+				project: doc.project,
+			})
+			.then(function (users) {
+				cached_project = doc.project;
+				project_users = users || [];
+				return match(project_users);
+			});
+	};
+	return fields;
+};
 
 // Task Split is a child table (istable=1) - it never renders as its own
 // Desk form, so a .js file under its own doctype folder never loads. Child
