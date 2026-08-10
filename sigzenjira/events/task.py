@@ -165,7 +165,7 @@ def _manual_task_under_story(doc):
 
 	# The split path inserts its Task BEFORE writing generated_task back onto
 	# the row, so during that window the only proof the Task already has a row
-	# is the is_generating claim generate_tasks_from_split stakes first. Only
+	# is the is_generating claim create_task_from_split_row stakes first. Only
 	# a row still IN that window counts - is_generating is never cleared once
 	# set, so an already-linked row would otherwise mask every later Task.
 	if frappe.db.exists(
@@ -178,7 +178,7 @@ def _manual_task_under_story(doc):
 
 
 def suffix_story_subject_on_manual_task(doc, method):
-	# generate_tasks_from_split names its generated Tasks "<item> - <Story
+	# create_task_from_split_row names its generated Tasks "<item> - <Story
 	# subject>". A Task typed straight into the Task form (or the list view, or
 	# the Work Board) under the same Story carried only what the user typed, so
 	# the same work ended up with two different subject shapes depending on which
@@ -526,11 +526,9 @@ def delete_task_with_sub_tasks(task_name):
 # going 1 -> 0 can strand billable Sub-tasks under the generated Task. Any new
 # raw write to either field must name the guard that covers it, or use save().
 def sync_split_row_edits_to_generated_task(doc, method):
-	# generate_tasks_from_split deliberately ignores edits to an
-	# already-generated row's expected_hours (see its own comment) - that
-	# only means "don't regenerate the Task", not "don't push the edit
-	# through". Without this, editing an already-split row never reaches the
-	# Task it created.
+	# create_task_from_split_row copies the row's hours/ECD/billable onto the
+	# Task once, at creation. Without this, a later edit to an already-generated
+	# row never reaches the Task it created.
 	if doc.custom_task_work_item_type != "Story":
 		return
 
@@ -589,72 +587,8 @@ def validate_hour_budget(doc, method):
 		)
 
 
-def generate_tasks_from_split(doc, method):
-	# Rows with no expected_hours yet are still being filled in (possibly by
-	# a different Projects Manager on a later save) - only turn a row into a
-	# real Task once it actually has hours, and only once: generated_task
-	# marks a row as done, so re-saving the Story never creates duplicates
-	# or reacts to edits made to an already-generated row's expected_hours.
-	if doc.custom_task_work_item_type != "Story":
-		return
-
-	for row in doc.get("custom_task_task_split") or []:
-		if not flt(row.expected_hours):
-			continue
-
-		# Don't trust row.generated_task/row.is_generating here - they're
-		# from the snapshot loaded when THIS invocation started. Core's
-		# populate_depends_on recursively re-enters this same function (via
-		# parent.save()) for every child Task inserted below, on its own
-		# freshly reloaded Story. A nested call can claim and fully generate
-		# a LATER row in this same list while THIS loop is still paused
-		# mid-iteration on an EARLIER row - so by the time this loop reaches
-		# that later row, its in-memory copy is stale even though the DB
-		# moved on. Re-check live DB state per row, right before acting.
-		live_generated_task, live_is_generating = frappe.db.get_value(
-			"Task Split", row.name, ["generated_task", "is_generating"]
-		)
-		if live_generated_task or live_is_generating:
-			continue
-
-		# Claiming the row BEFORE inserting means a recursive re-entry (see
-		# above) sees it as already spoken for instead of duplicating it.
-		# Can't use generated_task itself for this (it's a Link to Task, and
-		# core's parent.save() above fully re-validates the Story, including
-		# this Link - a placeholder string there fails link validation).
-		frappe.db.set_value("Task Split", row.name, "is_generating", 1)
-
-		task = frappe.get_doc(
-			{
-				"doctype": "Task",
-				"subject": f"{row.task_item} - {doc.subject}",
-				"project": doc.project,
-				"parent_task": doc.name,
-				"description": row.description,
-				"custom_task_work_item_type": "Task",
-				"expected_time": row.expected_hours,
-				"custom_task_is_billable": row.is_billable,
-				"priority": doc.priority,
-				"exp_end_date": row.ecd,
-			}
-		).insert(ignore_permissions=True)
-
-		frappe.db.set_value("Task Split", row.name, "generated_task", task.name)
-
-		# Picks staged before the row generated (task_split.js's Assign
-		# dialog, no generated_task yet -> pending_assign_users) become real
-		# assignment the moment the Task exists - same Story save, no extra
-		# round trip needed.
-		for user in json.loads(row.pending_assign_users) if row.pending_assign_users else []:
-			assign_to._add(
-				{"assign_to": [user], "doctype": "Task", "name": task.name}, ignore_permissions=True
-			)
-		if row.pending_assign_users:
-			frappe.db.set_value("Task Split", row.name, "pending_assign_users", None)
-
-
 def sync_expected_hours_to_split_row(doc, method):
-	# generate_tasks_from_split only writes Task Split.expected_hours once, at
+	# create_task_from_split_row only writes Task Split.expected_hours once, at
 	# creation time - a later edit to the generated Task's own expected_time
 	# never makes it back into the split row (or the Story's derived total)
 	# without this.
@@ -758,11 +692,12 @@ def set_split_row_assignees(row_name, users):
 
 
 @frappe.whitelist()
-def create_task_without_hours(row_name):
-	# generate_tasks_from_split only turns a row into a real Task once
-	# expected_hours is filled in - this is the escape hatch for a PM who
-	# wants the Task to exist (so it can be assigned/worked on) before the
-	# hour budget for it is known yet.
+def create_task_from_split_row(row_name):
+	# Saving the Story never turns a row into a Task on its own - filling in
+	# Expected Hours only stores the plan. This explicit per-row action is the
+	# ONLY thing that creates the Task, whether or not the row has hours yet
+	# (a PM may want the Task to exist, so it can be assigned/worked on,
+	# before its hour budget is known).
 	row = frappe.db.get_value(
 		"Task Split",
 		row_name,
@@ -771,6 +706,7 @@ def create_task_without_hours(row_name):
 			"task_item",
 			"description",
 			"ecd",
+			"expected_hours",
 			"generated_task",
 			"is_generating",
 			"pending_assign_users",
@@ -804,6 +740,7 @@ def create_task_without_hours(row_name):
 			"parent_task": story.name,
 			"description": row.description,
 			"custom_task_work_item_type": "Task",
+			"expected_time": flt(row.expected_hours),
 			"priority": story.priority,
 			"exp_end_date": row.ecd,
 			"custom_task_is_billable": row.is_billable,

@@ -5,6 +5,7 @@ from frappe.desk.form import assign_to
 from frappe.tests import IntegrationTestCase
 
 from sigzenjira.events.task import get_project_assignable_users, set_split_row_assignees
+from sigzenjira.tests import generate_split_tasks
 
 
 def make_task(subject, work_item_type, parent_task=None, expected_time=0):
@@ -45,7 +46,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4, "ecd": "2026-08-20"})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertIsNotNone(generated_task)
 
@@ -58,7 +59,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		story.custom_task_task_split[0].ecd = "2026-09-01"
@@ -73,7 +74,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		task = frappe.get_doc("Task", generated_task)
@@ -89,7 +90,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		assign_to.add({"assign_to": ["Administrator"], "doctype": "Task", "name": generated_task})
@@ -108,7 +109,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		row_name = story.custom_task_task_split[0].name
 		generated_task = story.custom_task_task_split[0].generated_task
 
@@ -154,7 +155,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		self.assertIn("Administrator", unscoped)
 		self.assertGreater(len(unscoped), len(scoped))
 
-	def test_pending_assign_applied_in_same_save_as_generation(self):
+	def test_pending_assign_applied_when_the_row_creates_its_task(self):
 		epic = make_task("AE Pending Same Save Epic", "Epic", expected_time=10)
 		story = make_task("AE Pending Same Save Story", "Story", epic.name)
 		story.append(
@@ -163,7 +164,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		)
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertIsNotNone(generated_task)
 
@@ -175,7 +176,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		self.assertIn("Administrator", assigned)
 		self.assertFalse(story.custom_task_task_split[0].pending_assign_users)
 
-	def test_pending_assign_staged_before_generation_then_applied(self):
+	def test_pending_assign_staged_before_the_row_has_hours_then_applied(self):
 		epic = make_task("AE Pending Later Epic", "Epic", expected_time=10)
 		story = make_task("AE Pending Later Story", "Story", epic.name)
 		story.append(
@@ -190,7 +191,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.custom_task_task_split[0].expected_hours = 4
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertIsNotNone(generated_task)
 
@@ -207,7 +208,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		frappe.delete_doc("Task", generated_task)
@@ -227,7 +228,7 @@ class TestTaskSplitAssignEcd(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
 
-		story.reload()
+		generate_split_tasks(story)
 		row_name = story.custom_task_task_split[0].name
 		generated_task = story.custom_task_task_split[0].generated_task
 

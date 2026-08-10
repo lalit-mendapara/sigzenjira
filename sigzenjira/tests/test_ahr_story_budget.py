@@ -6,6 +6,7 @@ from sigzenjira.sigzenjira.doctype.additional_hours_request.additional_hours_req
 	get_hour_summary,
 	get_story_hour_summary,
 )
+from sigzenjira.tests import generate_split_tasks
 from sigzenjira.tests.test_project_user_permission_helper import ensure_user, make_project
 
 APPROVER = "test_ahr_budget_approver@example.com"
@@ -53,7 +54,7 @@ class TestAHRStoryBudget(IntegrationTestCase):
 		self.story.reload()
 		self.story.expected_time = 10
 		self.story.save()
-		self.story.reload()
+		generate_split_tasks(self.story)
 		self.task = self.story.custom_task_task_split[0].generated_task
 
 	def tearDown(self):

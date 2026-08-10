@@ -545,7 +545,7 @@ frappe.ui.form.on("Task Split", {
 	},
 
 	create_action: function (frm, cdt, cdn) {
-		// Either flag - mirrors create_task_without_hours (events/task.py).
+		// Either flag - mirrors create_task_from_split_row (events/task.py).
 		const perms = frm.__task_split_perms;
 		if (perms && !(perms.allocate_hours || perms.set_work_item_type)) {
 			frappe.msgprint(
@@ -563,7 +563,7 @@ frappe.ui.form.on("Task Split", {
 		}
 
 		// The row only exists in the browser until the Story is saved -
-		// create_task_without_hours looks it up by name in the DB, so an
+		// create_task_from_split_row looks it up by name in the DB, so an
 		// unsaved Story (or a row just added to a saved one) would throw
 		// "Task Split row not found." Save first, then re-read the row: save
 		// replaces the client-side rows, so the real name comes from idx.
@@ -571,19 +571,16 @@ frappe.ui.form.on("Task Split", {
 
 		frappe.confirm(
 			needs_save
-				? __(
-						"Save this Story and create a Task for {0} without an Expected Hours budget?",
-						[row.task_item]
-				  )
-				: __("Create a Task for {0} without an Expected Hours budget?", [row.task_item]),
+				? __("Save this Story and create a Task for {0}?", [row.task_item])
+				: __("Create a Task for {0}?", [row.task_item]),
 			function () {
 				const ready = needs_save ? frm.save() : Promise.resolve();
 				ready.then(function () {
 					const saved_row = needs_save
 						? (frm.doc.custom_task_task_split || [])[row.idx - 1]
 						: row;
-					// Saving with expected_hours filled already generates the
-					// Task via generate_tasks_from_split - nothing left to do.
+					// Another session (or an earlier click) already created it -
+					// nothing left to do.
 					if (!saved_row || saved_row.generated_task) {
 						return;
 					}
@@ -597,7 +594,7 @@ frappe.ui.form.on("Task Split", {
 						return;
 					}
 					frappe.call({
-						method: "sigzenjira.events.task.create_task_without_hours",
+						method: "sigzenjira.events.task.create_task_from_split_row",
 						args: { row_name: saved_row.name },
 						freeze: true,
 						callback: function () {
@@ -665,8 +662,8 @@ frappe.ui.form.on("Task Split", {
 					});
 				} else {
 					// No Task yet - stage the picks on the row itself.
-					// generate_tasks_from_split (events/task.py) applies them as
-					// real assignment the moment the Story save creates the Task.
+					// create_task_from_split_row (events/task.py) applies them as
+					// real assignment the moment the row's Create action runs.
 					// The visible Assign column is otherwise only ever written by
 					// the real-assignment sync (events/todo.py), which has nothing
 					// to sync yet - fill it in here too, purely so the pick shows

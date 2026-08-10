@@ -1,7 +1,7 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from sigzenjira.events.task import create_task_without_hours, get_task_split_permissions
+from sigzenjira.events.task import create_task_from_split_row, get_task_split_permissions
 
 GRANTED_USER = "test_wit_granted@example.com"
 
@@ -129,7 +129,7 @@ class TestWorkItemTypeProjectGrant(IntegrationTestCase):
 			}
 		).insert()
 
-		task_name = create_task_without_hours(story.custom_task_task_split[0].name)
+		task_name = create_task_from_split_row(story.custom_task_task_split[0].name)
 		self.assertEqual(frappe.db.get_value("Task", task_name, "parent_task"), story.name)
 
 	def test_split_row_inheriting_the_storys_billable_flag_is_not_a_billable_edit(self):
@@ -166,7 +166,7 @@ class TestWorkItemTypeProjectGrant(IntegrationTestCase):
 
 		frappe.set_user(self.user)
 		with self.assertRaises(frappe.ValidationError):
-			create_task_without_hours(story.custom_task_task_split[0].name)
+			create_task_from_split_row(story.custom_task_task_split[0].name)
 
 	def test_story_edit_still_locked_without_the_grant(self):
 		story = frappe.get_doc(

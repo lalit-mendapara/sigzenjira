@@ -81,9 +81,9 @@ def make_task_under(story, subject, status="Open", assignees=None):
 	# Builds the Task through the Story's Task Split grid, which is where a
 	# Story's Tasks normally come from - make_task above would leave the row to
 	# be mirrored in afterwards instead. Layers assignee-writing on
-	# top of that module's make_task_under_story. expected_hours=1 is
-	# arbitrary but required - generate_tasks_from_split skips a row with no
-	# hours, so an ungenerated row would leave `task` unresolved below.
+	# top of that module's make_task_under_story, which fires each row's Create
+	# action. expected_hours=1 is arbitrary - a Task Split row carries hours in
+	# every real Story here.
 	task = make_task_under_story(story, subject, expected_hours=1, status=status)
 	if assignees:
 		frappe.db.set_value("Task", task.name, "_assign", json.dumps(assignees), update_modified=False)

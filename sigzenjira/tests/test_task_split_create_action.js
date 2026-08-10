@@ -5,7 +5,7 @@
 // handler, and drives it through a FAILED save - frm.save() resolves even when
 // the server throws (frappe/public/js/frappe/form/form.js after_save calls
 // resolve() whether or not r.exc is set), so the row is still __islocal when
-// the handler fires the server call, and create_task_without_hours answers
+// the handler fires the server call, and create_task_from_split_row answers
 // "Task Split row not found." on top of the real error.
 //
 // ponytail: plain node + vm, no jest - this app has no JS test runner and one
@@ -30,7 +30,13 @@ const sandbox = {
 	__: (s, args) => (args || []).reduce((t, a, i) => t.replace(`{${i}}`, a), s),
 	frappe: {
 		user_roles: ["Employee"],
-		ui: { form: { on: (dt, h) => Object.assign((handlers[dt] = handlers[dt] || {}), h) } },
+		ui: {
+			form: {
+				on: (dt, h) => Object.assign((handlers[dt] = handlers[dt] || {}), h),
+				// task.js patches this prototype at load time.
+				AssignToDialog: { prototype: { get_fields: () => [] } },
+			},
+		},
 		call: (opts) => calls.push(opts),
 		msgprint: (m) => messages.push(m),
 		confirm: (_msg, yes) => yes(),
@@ -84,7 +90,7 @@ function run({ save_persists }) {
 	assert.strictEqual(
 		calls.length,
 		0,
-		`failed save must NOT call create_task_without_hours, got row_name=${
+		`failed save must NOT call create_task_from_split_row, got row_name=${
 			calls[0] && calls[0].args.row_name
 		}`
 	);

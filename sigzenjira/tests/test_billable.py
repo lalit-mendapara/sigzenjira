@@ -4,7 +4,8 @@ from frappe.utils import today
 
 from sigzenjira.events.billable import BILLABLE_FIELDS
 from sigzenjira.events.issue import make_story
-from sigzenjira.events.task import create_task_without_hours
+from sigzenjira.events.task import create_task_from_split_row
+from sigzenjira.tests import generate_split_tasks
 from sigzenjira.tests import ensure_test_employment_type
 
 # No IGNORE_TEST_RECORD_DEPENDENCIES here: it only works for test modules inside
@@ -248,7 +249,7 @@ class TestBillableDownwardClamp(IntegrationTestCase):
 		)
 		story.append("custom_task_task_split", {"task_item": "Row work", "expected_hours": 4, "is_billable": 1})
 		story.insert()
-		story.reload()
+		generate_split_tasks(story)
 
 		generated = story.custom_task_task_split[0].generated_task
 		sub = make_task("BC Row Unbill Sub", "Sub-task", generated, is_billable=1)
@@ -513,7 +514,7 @@ class TestBillablePropagation(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "Free item", "expected_hours": 2, "is_billable": 0})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		billed_row, free_row = story.custom_task_task_split[0], story.custom_task_task_split[1]
 
 		self.assertEqual(frappe.db.get_value("Task", billed_row.generated_task, "custom_task_is_billable"), 1)
@@ -530,7 +531,7 @@ class TestBillablePropagation(IntegrationTestCase):
 		)
 		story.append("custom_task_task_split", {"task_item": "Push item", "expected_hours": 3, "is_billable": 1})
 		story.insert()
-		story.reload()
+		generate_split_tasks(story)
 		generated = story.custom_task_task_split[0].generated_task
 		# Generation seeded it from the row; without this the post-assert below
 		# could not tell a working push from a field that was never set.
@@ -552,7 +553,7 @@ class TestBillablePropagation(IntegrationTestCase):
 		)
 		story.append("custom_task_task_split", {"task_item": "Pull item", "expected_hours": 3, "is_billable": 1})
 		story.insert()
-		story.reload()
+		generate_split_tasks(story)
 		row_name = story.custom_task_task_split[0].name
 		# Generation seeded it from the row; without this the post-assert below
 		# could not tell a working pull from a field that was never set.
@@ -564,7 +565,7 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Task Split", row_name, "is_billable"), 0)
 
-	def test_create_task_without_hours_carries_the_rows_billable_flag(self):
+	def test_create_task_from_split_row_carries_the_rows_billable_flag(self):
 		# Nothing else in the app calls this function, so without a direct test
 		# its dict key and get_value field-list entry are unverified. Run as
 		# Administrator: user_has_project_flag returns True unconditionally for
@@ -584,18 +585,17 @@ class TestBillablePropagation(IntegrationTestCase):
 
 		# Assert right after each call, before the next one - core ERPNext's
 		# Task.on_update -> populate_depends_on() does a real parent.save() on
-		# every child Task insert (see generate_tasks_from_split's own comment
-		# on this same re-entrancy). That re-triggers the Story's on_update
+		# every child Task insert. That re-triggers the Story's on_update
 		# chain, including sync_split_row_edits_to_generated_task, which by the
 		# second call would find the first row's generated_task already set
 		# and push its billable flag independently - masking a broken
-		# create_task_without_hours behind the OTHER sync path. Checking
+		# create_task_from_split_row behind the OTHER sync path. Checking
 		# billed_task before free_task exists keeps this test isolated to the
 		# function under test.
-		billed_task = create_task_without_hours(story.custom_task_task_split[0].name)
+		billed_task = create_task_from_split_row(story.custom_task_task_split[0].name)
 		self.assertEqual(frappe.db.get_value("Task", billed_task, "custom_task_is_billable"), 1)
 
-		free_task = create_task_without_hours(story.custom_task_task_split[1].name)
+		free_task = create_task_from_split_row(story.custom_task_task_split[1].name)
 		self.assertEqual(frappe.db.get_value("Task", free_task, "custom_task_is_billable"), 0)
 
 

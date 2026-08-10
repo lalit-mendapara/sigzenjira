@@ -22,3 +22,21 @@ def ensure_test_employment_type():
 		)
 
 	return TEST_EMPLOYMENT_TYPE
+
+
+def generate_split_tasks(story):
+	"""Fire the per-row Create action for every ungenerated Task Split row.
+
+	Saving a Story never turns its rows into Tasks - filling in Expected Hours
+	only stores the plan - so a test that needs the real generated Tasks has to
+	ask for them the same way the grid's Create button does. Reloads the Story
+	so row.generated_task is populated on the caller's copy.
+	"""
+	from sigzenjira.events.task import create_task_from_split_row
+
+	for row in story.custom_task_task_split:
+		if not row.generated_task:
+			create_task_from_split_row(row.name)
+
+	story.reload()
+	return story

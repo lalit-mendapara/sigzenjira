@@ -267,9 +267,10 @@ def _current_steps(story_names):
 	"""Lowest-idx generated, still-open Task Split row per Story.
 
 	The sequence a user recognises is the split row's grid position, NOT the
-	generated Task's own name counter: generate_tasks_from_split skips rows with
-	no expected_hours, so filling row 2 first makes it T-001 and row 1 becomes
-	T-002 later. idx is the sequence; the Task contributes only status and ID.
+	generated Task's own name counter: a row only becomes a Task when someone
+	fires its Create action, so creating row 2 first makes it T-001 and row 1
+	becomes T-002 later. idx is the sequence; the Task contributes only status
+	and ID.
 	"""
 	if not story_names:
 		return {}

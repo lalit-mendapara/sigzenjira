@@ -42,7 +42,7 @@ CUSTOM_FIELDS = {
 		},
 		{
 			"fieldname": "custom_project_user_set_work_item_type",
-			"label": "Set Work Item Type",
+			"label": "Can Create Epic/Story/Task",
 			"fieldtype": "Check",
 			"insert_after": "custom_project_user_approve_extra_hours",
 			"description": "Can classify Tasks as Epic/Story/Task under this Project (everyone else is limited to Sub-task).",

@@ -26,8 +26,8 @@ class TestWorkBoardCurrentStep(IntegrationTestCase):
 			"WB Step Story", "Story", cls.project.name, cls.epic.name, expected_time=20
 		)
 
-		# Row 1 has no hours, so generate_tasks_from_split leaves it ungenerated -
-		# it must not hold back row 3 from being the current step.
+		# Row 1 never fires its Create action, so it stays ungenerated - it must
+		# not hold back row 3 from being the current step.
 		cls.story.append("custom_task_task_split", {"task_item": "WB Step Plan", "expected_hours": 0})
 		cls.story.save()
 

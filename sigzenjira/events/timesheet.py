@@ -271,8 +271,8 @@ def check_over_budget(timesheet_name):
 		effective_budget = flt(expected_time) + flt(extra_hours)
 		if not effective_budget:
 			# expected_time 0 means no budget declared yet (e.g. a Task created
-			# via the Task Split "Create Task" escape hatch before hours are
-			# known - see create_task_without_hours), not a 0h budget already
+			# via the Task Split "Create Task" action before hours are
+			# known - see create_task_from_split_row), not a 0h budget already
 			# exhausted. Same convention as validate_hour_budget's parent_budget check.
 			continue
 		projected = flt(current_actual) + new_hours

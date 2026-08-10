@@ -1,6 +1,8 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from sigzenjira.events.task import create_task_from_split_row
+
 
 def make_task(
 	subject, work_item_type, parent_task=None, expected_time=0, status="Open", is_billable=0, project=None
@@ -35,7 +37,15 @@ def make_task_under_story(story, task_item, expected_hours=0, status="Open", is_
 	# ponytail: assumes task_item is unique within a Story - true at every
 	# call site today, and a duplicate would silently return the first match.
 	row = next(r for r in story.custom_task_task_split if r.task_item == task_item)
-	task = frappe.get_doc("Task", row.generated_task)
+	# Saving the Story only stores the plan line - this is the grid's Create
+	# action, and only for the row this call just added.
+	task_name = row.generated_task or create_task_from_split_row(row.name)
+	# Creating the Task saves the Story behind our back (core's
+	# populate_depends_on), so the caller's copy has to catch up before it
+	# appends another row.
+	story.reload()
+
+	task = frappe.get_doc("Task", task_name)
 
 	if status != "Open":
 		task.status = status
@@ -113,8 +123,12 @@ class TestStatusCascade(IntegrationTestCase):
 	def test_story_stays_working_while_a_split_row_is_ungenerated(self):
 		story = make_task("PH7 Split Story", "Story", expected_time=0)
 		story.append("custom_task_task_split", {"task_item": "Done bit", "expected_hours": 3})
-		story.append("custom_task_task_split", {"task_item": "Not costed yet"})  # no hours -> no Task
+		story.append("custom_task_task_split", {"task_item": "Not planned yet"})
 		story.save()
+
+		# Only the first row is turned into a Task - the second stays a plan line.
+		story.reload()
+		create_task_from_split_row(story.custom_task_task_split[0].name)
 
 		generated = frappe.get_all("Task", filters={"parent_task": story.name}, pluck="name")
 		self.assertEqual(len(generated), 1)

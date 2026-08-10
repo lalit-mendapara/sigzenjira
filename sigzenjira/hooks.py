@@ -175,7 +175,6 @@ doc_events = {
 		"on_update": [
 			"sigzenjira.events.task.create_split_row_for_manual_task",
 			"sigzenjira.events.task.delete_tasks_for_removed_split_rows",
-			"sigzenjira.events.task.generate_tasks_from_split",
 			"sigzenjira.events.task.sync_split_row_edits_to_generated_task",
 			"sigzenjira.events.task.sync_expected_hours_to_split_row",
 			"sigzenjira.events.task.cascade_completion_to_parent",

@@ -2,6 +2,8 @@ import frappe
 from frappe.model.workflow import apply_workflow
 from frappe.tests import IntegrationTestCase
 
+from sigzenjira.tests import generate_split_tasks
+
 
 def make_task(subject, work_item_type, parent_task=None, expected_time=0):
 	doc = frappe.get_doc(
@@ -76,7 +78,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.reload()
 		story.expected_time = 6
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		ahr = frappe.get_doc(
 			{
@@ -119,7 +121,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.reload()
 		story.expected_time = 10
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		task = frappe.get_doc("Task", story.custom_task_task_split[0].generated_task)
 		task.expected_time = 12
@@ -159,7 +161,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story = make_task("SR SubDel Story", "Story", epic.name, expected_time=10)
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 3})
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		task = story.custom_task_task_split[0].generated_task
 		sub_task = make_task("SR SubDel Sub", "Sub-task", task)
@@ -192,7 +194,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.reload()
 		story.expected_time = 10
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		task = frappe.get_doc("Task", story.custom_task_task_split[0].generated_task)
 		task.expected_time = 3
@@ -225,7 +227,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertEqual(frappe.db.get_value("Task", generated_task, "priority"), "High")
 
@@ -242,7 +244,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		ahr = frappe.get_doc(
@@ -274,7 +276,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 
 		task = frappe.get_doc("Task", generated_task)
@@ -300,7 +302,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 3})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertEqual(frappe.db.get_value("Task", generated_task, "expected_time"), 3)
 
@@ -323,7 +325,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "T2", "expected_hours": 2})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		t1 = story.custom_task_task_split[0].generated_task
 		t2 = story.custom_task_task_split[1].generated_task
 
@@ -355,7 +357,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story.append("custom_task_task_split", {"task_item": "Drop", "expected_hours": 2})
 		story.insert()
 
-		story.reload()
+		generate_split_tasks(story)
 		keep_task = story.custom_task_task_split[0].generated_task
 		drop_task = story.custom_task_task_split[1].generated_task
 
@@ -466,7 +468,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 		story = make_task("SR Subject Story", "Story", epic.name, expected_time=10)
 		story.append("custom_task_task_split", {"task_item": "Split Item", "expected_hours": 4})
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		split_task = frappe.get_doc("Task", story.custom_task_task_split[0].generated_task)
 		self.assertEqual(split_task.subject, "Split Item - SR Subject Story")
@@ -505,7 +507,7 @@ class TestStorySplitRollup(IntegrationTestCase):
 
 		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
 		story.save()
-		story.reload()
+		generate_split_tasks(story)
 
 		generated_task = story.custom_task_task_split[0].generated_task
 		self.assertTrue(generated_task)
@@ -515,3 +517,22 @@ class TestStorySplitRollup(IntegrationTestCase):
 		task.expected_time = 3
 		task.save()
 		self.assertEqual(frappe.db.get_value("Task", generated_task, "expected_time"), 3)
+
+	def test_saving_a_row_with_hours_never_creates_the_task_on_its_own(self):
+		# Filling in Expected Hours is planning, not creating - only the row's
+		# own Create action (create_task_from_split_row) makes the Task.
+		epic = make_task("SR No Autogen Epic", "Epic", expected_time=10)
+		story = make_task("SR No Autogen Story", "Story", epic.name)
+		story.append("custom_task_task_split", {"task_item": "T1", "expected_hours": 4})
+		story.save()
+
+		story.reload()
+		self.assertIsNone(story.custom_task_task_split[0].generated_task)
+		self.assertEqual(frappe.get_all("Task", filters={"parent_task": story.name}), [])
+		# ...and the plan still rolls up onto the Story.
+		self.assertEqual(story.expected_time, 4)
+
+		generate_split_tasks(story)
+		task = story.custom_task_task_split[0].generated_task
+		self.assertIsNotNone(task)
+		self.assertEqual(frappe.db.get_value("Task", task, "expected_time"), 4)
