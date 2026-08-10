@@ -164,6 +164,7 @@ doc_events = {
 			"sigzenjira.events.task.validate_employee_story_field_restriction",
 			"sigzenjira.events.task.rollup_story_expected_time",
 			"sigzenjira.events.task.validate_hour_budget",
+			"sigzenjira.events.task.validate_ecd_within_issue_ecd",
 			"sigzenjira.events.task.validate_expected_time_edit_permission",
 			"sigzenjira.events.task.sync_actual_extra_hours",
 			"sigzenjira.events.billable.validate_billable_edit_permission",

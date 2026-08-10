@@ -587,6 +587,63 @@ def validate_hour_budget(doc, method):
 		)
 
 
+def _date(value):
+	return getdate(value) if value else None
+
+
+def _governing_issue_ecd(doc):
+	# Only the item that links the Issue carries custom_task_issue_ecd - it is a
+	# fetch_from mirror, so a generated Task (create_task_from_split_row never
+	# copies `issue` over) and its Sub-tasks have it empty. Walk up until an
+	# ancestor has one; the chain is at most Sub-task -> Task -> Story and
+	# NestedSet already refuses a cycle.
+	ecd, parent = doc.get("custom_task_issue_ecd"), doc.parent_task
+	while not ecd and parent:
+		ancestor = frappe.db.get_value("Task", parent, ["custom_task_issue_ecd", "parent_task"], as_dict=True)
+		if not ancestor:
+			break
+		ecd, parent = ancestor.custom_task_issue_ecd, ancestor.parent_task
+
+	return _date(ecd)
+
+
+def validate_ecd_within_issue_ecd(doc, method):
+	# The Issue's ECD is the date the customer was promised, so nothing planned
+	# under it may land after it - neither the Task's own exp_end_date nor a
+	# Task Split row's ecd (which becomes exactly that on the Task the row
+	# generates, and is pushed onto an already-generated one by
+	# sync_split_row_edits_to_generated_task).
+	#
+	# Only a date that MOVES on this save is checked, the same way
+	# validate_work_item_type_permission works. A Task already past the Issue
+	# ECD - because the rule arrived after it, or because the Issue's own date
+	# was pulled in later - has to stay editable for status/progress, otherwise
+	# the breach locks the record that is the only way to fix it.
+	issue_ecd = _governing_issue_ecd(doc)
+	if not issue_ecd:
+		return
+
+	before = doc.get_doc_before_save()
+
+	task_ecd = _date(doc.exp_end_date)
+	if task_ecd and task_ecd > issue_ecd and _date(before.exp_end_date if before else None) != task_ecd:
+		frappe.throw(
+			_("Expected End Date {0} is after the Issue ECD {1}.").format(
+				frappe.format(task_ecd, "Date"), frappe.format(issue_ecd, "Date")
+			)
+		)
+
+	before_rows = {row.name: _date(row.ecd) for row in (before.custom_task_task_split if before else [])}
+	for row in doc.get("custom_task_task_split") or []:
+		row_ecd = _date(row.ecd)
+		if row_ecd and row_ecd > issue_ecd and before_rows.get(row.name) != row_ecd:
+			frappe.throw(
+				_("Row {0}: ECD {1} is after the Issue ECD {2}.").format(
+					row.idx, frappe.format(row_ecd, "Date"), frappe.format(issue_ecd, "Date")
+				)
+			)
+
+
 def sync_expected_hours_to_split_row(doc, method):
 	# create_task_from_split_row only writes Task Split.expected_hours once, at
 	# creation time - a later edit to the generated Task's own expected_time
