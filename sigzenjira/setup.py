@@ -5,7 +5,6 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 from sigzenjira.custom_field import CUSTOM_FIELDS
 from sigzenjira.custom_permission import create_custom_docperms
-from sigzenjira.dashboard.pm_dashboard import create_pm_dashboard
 from sigzenjira.property_setter import apply_property_setters
 
 
@@ -24,7 +23,6 @@ def after_install():
 	create_additional_hours_request_workflow()
 	create_additional_hours_request_notifications()
 	create_ecd_notifications()
-	create_pm_dashboard()
 	add_work_board_workspace_shortcut()
 	add_project_billing_workspace_shortcut()
 	frappe.clear_cache(doctype="Task")
@@ -288,9 +286,10 @@ def get_project_billing_workspace_shortcut():
 
 
 def add_workspace_shortcut(shortcut, block_id):
-	# Same LinkValidationError landmine as add_pm_dashboard_workspace_shortcut
-	# (dashboard/pm_dashboard.py): the child row and the `content` block are
-	# written directly, never through ws.save().
+	# The "Project Management" workspace carries a pre-existing broken shortcut
+	# (Task Hour Budget Overrun -> a Report that does not exist on this site),
+	# so ws.save() would blow up with LinkValidationError: the child row and the
+	# `content` block are written directly, never through ws.save().
 	if not frappe.db.exists(
 		"Workspace Shortcut", {"parent": "Project Management", "link_to": shortcut["link_to"]}
 	):

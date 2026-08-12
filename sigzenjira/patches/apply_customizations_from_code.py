@@ -1,7 +1,6 @@
 import frappe
 
 from sigzenjira.custom_permission import create_custom_docperms
-from sigzenjira.dashboard.pm_dashboard import create_pm_dashboard
 from sigzenjira.property_setter import apply_property_setters
 from sigzenjira.setup import (
 	create_additional_hours_request_notifications,
@@ -26,7 +25,6 @@ def execute():
 	apply_property_setters()
 	create_custom_docperms()
 	create_additional_hours_request_notifications()
-	create_pm_dashboard()
 	frappe.clear_cache(doctype="Task")
 	frappe.clear_cache(doctype="Issue")
 	frappe.clear_cache(doctype="Timesheet Detail")

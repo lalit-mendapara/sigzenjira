@@ -7,8 +7,8 @@
 #
 # This app has NO `fixtures` hook - nothing is re-applied automatically on
 # migrate. Every customization is declared in Python (custom_field.py,
-# property_setter.py, custom_permission.py, dashboard/pm_dashboard.py,
-# setup.py), created on a fresh site by setup.py:after_install, and pushed to
+# property_setter.py, custom_permission.py, setup.py), created on a fresh
+# site by setup.py:after_install, and pushed to
 # already-installed sites by a patch listed below. One patch per change:
 # add/edit the declaration, then add a patch that applies just that change.
 #
@@ -22,7 +22,6 @@
 sigzenjira.patches.rename_custom_fields_with_doctype_prefix
 sigzenjira.patches.normalize_custom_field_names
 sigzenjira.patches.add_additional_hours_request_workflow
-sigzenjira.patches.add_pm_dashboard_shortcut
 sigzenjira.patches.backfill_task_split_assign_ecd
 sigzenjira.patches.remove_task_project_name_field
 sigzenjira.patches.wire_project_user_hour_flags
@@ -48,3 +47,4 @@ sigzenjira.patches.add_project_billing_page
 sigzenjira.patches.show_billing_split_under_completed
 sigzenjira.patches.relabel_set_work_item_type_field
 sigzenjira.patches.add_ecd_due_notifications
+sigzenjira.patches.remove_pm_dashboard
