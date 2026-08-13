@@ -335,6 +335,30 @@ function seed_billable_from_source(frm) {
 	});
 }
 
+// Nothing under a non-billable Project can ever be billable - the server refuses
+// it (events/billable.py) - so the box is not a choice there, it is a dead
+// control that can only produce an error. Hide it rather than offer it, and drop
+// the Billable column off the Task Split grid for the same reason.
+function toggle_billable_visibility(frm) {
+	if (!frm.doc.project) {
+		frm.set_df_property("custom_task_is_billable", "hidden", 0);
+		return;
+	}
+
+	frappe.db.get_value("Project", frm.doc.project, "custom_project_is_billable").then((r) => {
+		const project_billable = cint(r.message && r.message.custom_project_is_billable);
+		frm.set_df_property("custom_task_is_billable", "hidden", project_billable ? 0 : 1);
+		frm.fields_dict.custom_task_task_split &&
+			frm.fields_dict.custom_task_task_split.grid.update_docfield_property(
+				"is_billable",
+				"hidden",
+				project_billable ? 0 : 1
+			);
+		frm.refresh_field("custom_task_is_billable");
+		frm.refresh_field("custom_task_task_split");
+	});
+}
+
 frappe.ui.form.on("Task", {
 	onload_post_render(frm) {
 		if (frm.is_new()) {
@@ -359,6 +383,9 @@ frappe.ui.form.on("Task", {
 			// only exists once a Project is picked - and changes with it.
 			narrow_work_item_type(frm);
 		}
+
+		// Visibility is not a default: it follows the Project on a saved Task too.
+		toggle_billable_visibility(frm);
 	},
 
 	onload: function (frm) {
@@ -427,6 +454,7 @@ frappe.ui.form.on("Task", {
 		lock_story_to_template_only(frm);
 		lock_task_split_columns(frm);
 		refresh_task_split_status_colors(frm);
+		toggle_billable_visibility(frm);
 
 		// Re-picking the value a Link field already holds fires no change
 		// event, so custom_task_task_template alone gives a Story that lost a row

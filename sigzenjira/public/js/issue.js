@@ -14,6 +14,22 @@ function seed_billable_from_source(frm) {
 	});
 }
 
+// An Issue on a non-billable Project can never be billable - the server refuses
+// it (events/billable.py) - so the box there is a dead control that can only
+// produce an error. Hide it rather than offer it.
+function toggle_billable_visibility(frm) {
+	if (!frm.doc.project) {
+		frm.set_df_property("custom_issue_is_billable", "hidden", 0);
+		return;
+	}
+
+	frappe.db.get_value("Project", frm.doc.project, "custom_project_is_billable").then((r) => {
+		const project_billable = cint(r.message && r.message.custom_project_is_billable);
+		frm.set_df_property("custom_issue_is_billable", "hidden", project_billable ? 0 : 1);
+		frm.refresh_field("custom_issue_is_billable");
+	});
+}
+
 frappe.ui.form.on("Issue", {
 	onload_post_render(frm) {
 		if (frm.is_new()) {
@@ -29,10 +45,14 @@ frappe.ui.form.on("Issue", {
 		if (frm.is_new()) {
 			seed_billable_from_source(frm);
 		}
+
+		// Visibility is not a default: it follows the Project on a saved Issue too.
+		toggle_billable_visibility(frm);
 	},
 
 	refresh(frm) {
 		frm.remove_custom_button("Task", "Create");
+		toggle_billable_visibility(frm);
 
 		if (frm.doc.status !== "Closed") {
 			frm.add_custom_button(
